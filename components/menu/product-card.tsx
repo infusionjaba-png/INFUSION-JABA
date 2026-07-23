@@ -100,7 +100,7 @@ export const ProductCard = memo(function ProductCard({
         <motion.div
           layoutId={`product-image-${item.id}`}
           className={cn(styles.imageWrap, !item.inStock && styles.imageWrapOos)}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
         >
           <Image
             src={item.image || "/placeholder.jpg"}
@@ -168,8 +168,7 @@ export const ProductCard = memo(function ProductCard({
                 aria-label={`Add ${item.name} to cart`}
                 className={cn(styles.addBtn, !item.inStock && styles.addBtnGhost)}
               >
-                <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                Add
+                + Add
               </button>
             )}
           </div>
@@ -218,8 +217,7 @@ export const ProductCard = memo(function ProductCard({
                       setQuickLook(null)
                     }}
                   >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                    Add
+                    + Add
                   </button>
                 </div>
               </div>

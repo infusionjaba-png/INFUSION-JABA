@@ -42,7 +42,7 @@ const PAIRINGS: Record<string, string> = {
 
 const NOTES: Record<string, string> = {
   tequila:
-    "Clean agave and citrus on the nose. Smooth finish — best served chilled as a neat pour or with lime & salt.",
+    "Crisp, unaged 100% agave. Bright citrus on the nose, clean pepper finish. Best ice-cold.",
   whiskey:
     "Warm oak and caramel notes. Best served neat or with a single large cube.",
   whisky:

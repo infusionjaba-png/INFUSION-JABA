@@ -1,6 +1,6 @@
 "use client"
 
-import React, { memo, useEffect, useRef, useState, useCallback } from "react"
+import React, { memo, useEffect, useRef, useState } from "react"
 import {
   Sheet,
   SheetContent,
@@ -11,7 +11,14 @@ import { Plus, Minus, X, Flame } from "lucide-react"
 import Image from "next/image"
 import { MenuItem } from "@/types/menu"
 import { cn } from "@/lib/utils"
-import { motion, AnimatePresence } from "framer-motion"
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useTransform,
+  useDragControls,
+  animate,
+} from "framer-motion"
 import {
   eyebrowFor,
   tastingNotesFor,
@@ -32,6 +39,8 @@ interface ProductSheetProps {
   onRemoveFromOrder?: (itemId: string) => void
 }
 
+const SPRING = { type: "spring" as const, stiffness: 380, damping: 32, mass: 0.9 }
+
 export const ProductSheet = memo(function ProductSheet({
   open,
   onOpenChange,
@@ -45,8 +54,10 @@ export const ProductSheet = memo(function ProductSheet({
   const [isDesktop, setIsDesktop] = useState(false)
   const [localQty, setLocalQty] = useState(1)
   const [flash, setFlash] = useState(false)
-  const [parallax, setParallax] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const dragControls = useDragControls()
+  const dragY = useMotionValue(0)
+  const dragOpacity = useTransform(dragY, [0, 160], [1, 0.55])
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)")
@@ -60,16 +71,10 @@ export const ProductSheet = memo(function ProductSheet({
     if (open) {
       setLocalQty(Math.max(1, quantity || 1))
       setFlash(false)
-      setParallax(0)
+      dragY.set(0)
       if (scrollRef.current) scrollRef.current.scrollTop = 0
     }
-  }, [open, item?.id, quantity])
-
-  const onScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    setParallax(el.scrollTop * 0.5)
-  }, [])
+  }, [open, item?.id, quantity, dragY])
 
   if (!item) return null
 
@@ -93,19 +98,40 @@ export const ProductSheet = memo(function ProductSheet({
 
   const content = (
     <motion.div
-      initial={{ opacity: 0, y: 24 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className={styles.panel}
+      style={isDesktop ? undefined : { y: dragY, opacity: dragOpacity }}
+      initial={isDesktop ? { opacity: 0, scale: 0.96 } : { y: 36 }}
+      animate={isDesktop ? { opacity: 1, scale: 1 } : { y: 0 }}
+      transition={SPRING}
+      drag={isDesktop ? false : "y"}
+      dragControls={dragControls}
+      dragListener={false}
+      dragConstraints={{ top: 0, bottom: 0 }}
+      dragElastic={{ top: 0.04, bottom: 0.55 }}
+      onDragEnd={(_, info) => {
+        if (info.offset.y > 90 || info.velocity.y > 650) {
+          onOpenChange(false)
+        } else {
+          animate(dragY, 0, SPRING)
+        }
+      }}
     >
-      <div ref={scrollRef} className={styles.scroll} onScroll={onScroll}>
-        <div className={styles.hero}>
-          <div className={styles.handle} />
+      <div ref={scrollRef} className={styles.scroll}>
+        {/* Hero — exactly 150px; pointer on hero starts sheet dismiss drag */}
+        <div
+          className={styles.hero}
+          onPointerDown={(e) => {
+            if (isDesktop) return
+            // Don't steal the close button
+            if ((e.target as HTMLElement).closest("button")) return
+            dragControls.start(e)
+          }}
+        >
+          <div className={styles.handle} aria-hidden />
           <motion.div
             layoutId={`product-image-${item.id}`}
             className={styles.heroImageWrap}
-            style={{ transform: `translateY(${parallax}px)` }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
           >
             <Image
               src={item.image || "/placeholder.jpg"}
@@ -128,10 +154,15 @@ export const ProductSheet = memo(function ProductSheet({
             <X className="h-3.5 w-3.5" strokeWidth={2.5} />
           </button>
 
-          {eyebrow && <p className={styles.eyebrow}>{eyebrow}</p>}
+          {eyebrow && (
+            <div className={styles.eyebrowStrip}>
+              <p className={styles.eyebrow}>{eyebrow}</p>
+            </div>
+          )}
         </div>
 
-        <div className={styles.info}>
+        {/* Body — natural flow, no spacer / flex-grow */}
+        <div className={styles.body}>
           {isDesktop ? (
             <DialogTitle className="sr-only">{item.name}</DialogTitle>
           ) : (
@@ -147,10 +178,6 @@ export const ProductSheet = memo(function ProductSheet({
 
           <p className={styles.desc}>{notes}</p>
 
-          {item.isJaba && (
-            <p className={styles.houseNote}>From the bar — house recommendation</p>
-          )}
-
           {options.length > 0 && (
             <div className={styles.servings} role="radiogroup" aria-label="Serving">
               {options.map((opt) => {
@@ -165,17 +192,10 @@ export const ProductSheet = memo(function ProductSheet({
                     className={cn(styles.serving, selected && styles.servingSelected)}
                     onClick={() => onSelectServing?.(opt)}
                   >
-                    {selected && (
-                      <motion.div
-                        layoutId="serving-pill"
-                        className={styles.servingPill}
-                        transition={{ type: "spring", stiffness: 420, damping: 32 }}
-                      />
-                    )}
-                    <span className={styles.servingLabel} style={{ position: "relative", zIndex: 1 }}>
+                    <span className={styles.servingLabel}>
                       {servingLabel(opt)}
                     </span>
-                    <span className={styles.servingPrice} style={{ position: "relative", zIndex: 1 }}>
+                    <span className={styles.servingPrice}>
                       KES {(Number(opt.price) || 0).toLocaleString()}
                     </span>
                   </button>
@@ -185,77 +205,76 @@ export const ProductSheet = memo(function ProductSheet({
           )}
 
           <p className={styles.pairing}>
-            <Flame className={cn("h-3.5 w-3.5", styles.pairingIcon)} />
+            <Flame className={styles.pairingIcon} strokeWidth={2.5} />
             {pairing}
           </p>
-        </div>
-      </div>
 
-      <div className={styles.actionBar}>
-        {!item.inStock ? (
-          <div className={styles.oosBox}>Currently out of stock</div>
-        ) : (
-          <>
-            <div className={styles.actionRow}>
-              <div className={styles.stepper}>
+          {/* Action row — IN CONTENT FLOW, directly after pairing */}
+          {!item.inStock ? (
+            <div className={styles.oosBox}>Currently out of stock</div>
+          ) : (
+            <>
+              <div className={styles.actionRow}>
+                <div className={styles.stepper}>
+                  <button
+                    type="button"
+                    className={cn(styles.stepBtn, styles.stepMinus)}
+                    aria-label="Decrease quantity"
+                    disabled={localQty <= 1 && !inOrder}
+                    onClick={() => setLocalQty((q) => Math.max(1, q - 1))}
+                  >
+                    <Minus className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                  <span key={localQty} className={styles.stepCount}>
+                    {localQty}
+                  </span>
+                  <button
+                    type="button"
+                    className={cn(styles.stepBtn, styles.stepPlus)}
+                    aria-label="Increase quantity"
+                    onClick={() => setLocalQty((q) => q + 1)}
+                  >
+                    <Plus className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  className={styles.stepBtn}
-                  aria-label="Decrease quantity"
-                  disabled={localQty <= 1 && !inOrder}
-                  onClick={() => setLocalQty((q) => Math.max(1, q - 1))}
+                  onClick={handleConfirm}
+                  className={cn(styles.cta, flash && styles.ctaFlash)}
                 >
-                  <Minus className="h-4 w-4" strokeWidth={2.5} />
-                </button>
-                <span key={localQty} className={styles.stepCount}>
-                  {localQty}
-                </span>
-                <button
-                  type="button"
-                  className={styles.stepBtn}
-                  aria-label="Increase quantity"
-                  onClick={() => setLocalQty((q) => q + 1)}
-                >
-                  <Plus className="h-4 w-4" strokeWidth={2.5} />
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={`${inOrder ? "u" : "a"}-${lineTotal}`}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.18 }}
+                      className={styles.ctaTotal}
+                    >
+                      {inOrder ? "Update" : "Add"}
+                      {" · "}
+                      KES {lineTotal.toLocaleString()}
+                    </motion.span>
+                  </AnimatePresence>
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={handleConfirm}
-                className={cn(styles.cta, flash && styles.ctaFlash)}
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span
-                    key={`${inOrder ? "u" : "a"}-${lineTotal}`}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.18 }}
-                    className={styles.ctaTotal}
-                  >
-                    {inOrder ? "Update order" : "Add"}
-                    {" · "}
-                    KES {lineTotal.toLocaleString()}
-                  </motion.span>
-                </AnimatePresence>
-              </button>
-            </div>
-
-            {inOrder && onRemoveFromOrder && (
-              <button
-                type="button"
-                className={styles.removeBtn}
-                onClick={() => {
-                  onRemoveFromOrder(item.id)
-                  onOpenChange(false)
-                }}
-              >
-                Remove
-              </button>
-            )}
-          </>
-        )}
+              {inOrder && onRemoveFromOrder && (
+                <button
+                  type="button"
+                  className={styles.removeBtn}
+                  onClick={() => {
+                    onRemoveFromOrder(item.id)
+                    onOpenChange(false)
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </motion.div>
   )
@@ -276,7 +295,7 @@ export const ProductSheet = memo(function ProductSheet({
         side="bottom"
         showClose={false}
         className={styles.sheetShell}
-        overlayClassName="bg-[rgba(10,8,6,0.6)]"
+        overlayClassName="bg-[rgba(10,8,6,0.65)]"
       >
         {content}
       </SheetContent>
