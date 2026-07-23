@@ -20,12 +20,14 @@ import { PaymentModal } from "@/components/menu/payment-modal"
 import { OrderTracking } from "@/components/menu/order-tracking"
 import { OrderHistoryDrawer } from "@/components/menu/order-history-drawer"
 import { ActiveOrdersDrawer } from "@/components/menu/active-orders-drawer"
+import { CallWaiterSheet } from "@/components/menu/call-waiter-sheet"
 import { CustomerNumberModal } from "@/components/menu/customer-number-modal"
 import { formatOrderLabel } from "@/components/menu/order-display"
 import { enrichMenuItem, findServingSiblings } from "@/components/menu/product-meta"
 import { orderStore } from "@/lib/orderStore"
 import { MenuItem, CartItem, Order, MenuCategory } from "@/types/menu"
 import { useDebounce } from "@/hooks/use-debounce"
+import { useWaiterCallCooldown } from "@/hooks/use-waiter-call-cooldown"
 import { cn } from "@/lib/utils"
 import { normalizeKenyaPhone } from "@/lib/phone-utils"
 import styles from "./menu.module.css"
@@ -75,6 +77,8 @@ function MenuContent() {
   const [showOrderTracking, setShowOrderTracking] = useState(false)
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
   const [activeOrdersOpen, setActiveOrdersOpen] = useState(false)
+  const [callWaiterOpen, setCallWaiterOpen] = useState(false)
+  const [callWaiterOrderId, setCallWaiterOrderId] = useState<string | null>(null)
   const [orderSentConfirm, setOrderSentConfirm] = useState<{
     orderLabel: string
     tableNumber: string
@@ -92,6 +96,7 @@ function MenuContent() {
   const pendingSyncItemsRef = useRef<CartItem[] | null>(null)
 
   const debouncedSearch = useDebounce(searchQuery, 150)
+  const waiterCooldown = useWaiterCallCooldown(tableNumber || null)
 
   const hasJaba = menuItems.some((i) => i.isJaba)
 
@@ -854,6 +859,14 @@ function MenuContent() {
                   setActiveOrder(order)
                   setShowPaymentModal(true)
                 }}
+                onCallWaiter={(order) => {
+                  if (waiterCooldown.cooling) return
+                  setCallWaiterOrderId(order.orderId)
+                  setActiveOrdersOpen(false)
+                  setCallWaiterOpen(true)
+                }}
+                callWaiterDisabled={waiterCooldown.cooling}
+                callWaiterLabel={waiterCooldown.label}
                 onReorder={handleReorder}
               >
                 <button
@@ -1035,6 +1048,17 @@ function MenuContent() {
       <CustomerNumberModal
         open={showCustomerModal}
         onContinue={handleCustomerContinue}
+      />
+
+      <CallWaiterSheet
+        open={callWaiterOpen}
+        onOpenChange={(open) => {
+          setCallWaiterOpen(open)
+          if (!open) setCallWaiterOrderId(null)
+        }}
+        tableNumber={tableNumber}
+        customerPhone={customerNumber}
+        orderId={callWaiterOrderId ?? activeOrder?.orderId ?? null}
       />
 
       <PaymentModal

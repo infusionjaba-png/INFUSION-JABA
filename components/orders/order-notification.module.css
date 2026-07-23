@@ -299,6 +299,82 @@
   background: #faf5ec;
 }
 
+/* ── Waiter call actions (pill pair) ───────────────────────────── */
+
+.waiterActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.onIt {
+  flex: 1;
+  height: 42px;
+  border: none;
+  border-radius: 999px;
+  background: #d9843b;
+  color: #412402;
+  font-size: 14px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    background 200ms ease;
+}
+
+.onIt:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.onIt:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.onIt:disabled {
+  cursor: default;
+}
+
+.onItDone {
+  background: #c9782e;
+  filter: brightness(1.08);
+}
+
+.enableSound {
+  flex-shrink: 0;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #e0d5c5;
+  background: #fffdf9;
+  color: #d9843b;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.enableSound:hover {
+  background: #faf5ec;
+  border-color: #d9cbb8;
+}
+
+.enableSoundIcon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
 /* ── Motion shells ─────────────────────────────────────────────── */
 
 .enter {

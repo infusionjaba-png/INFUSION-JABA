@@ -1,0 +1,314 @@
+/* Golden Hour — Call Waiter compact bottom sheet */
+
+.sheetShell {
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 20px 20px 0 0 !important;
+  border: 1px solid rgba(242, 232, 216, 0.14) !important;
+  border-bottom: none !important;
+  background: #2e241b !important;
+  height: auto !important;
+  max-height: 90vh !important;
+  gap: 0 !important;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: min(90vh, 100%);
+  background: #2e241b;
+  overflow: hidden;
+}
+
+.handle {
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+  padding-bottom: 2px;
+  flex-shrink: 0;
+}
+
+.handleBar {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(245, 235, 220, 0.5);
+}
+
+.body {
+  position: relative;
+  padding: 8px 16px max(16px, env(safe-area-inset-bottom));
+  min-height: 0;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--menu-font-display), Georgia, serif;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: #f5ebdc;
+  text-align: center;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(242, 232, 216, 0.65);
+  text-align: center;
+}
+
+.reasonGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.reasonCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 13px;
+  background: #382c21;
+  border: 1px solid rgba(242, 232, 216, 0.14);
+  text-align: left;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    transform 160ms ease;
+  cursor: pointer;
+}
+
+.reasonCard:active {
+  transform: scale(0.98);
+}
+
+.reasonIcon {
+  width: 18px;
+  height: 18px;
+  color: #d9843b;
+  flex-shrink: 0;
+}
+
+.reasonLabel {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.25;
+  color: rgba(245, 235, 220, 0.85);
+}
+
+.reasonSelected {
+  background: #d9843b;
+  border-color: #d9843b;
+}
+
+.reasonSelected .reasonIcon {
+  color: #412402;
+}
+
+.reasonSelected .reasonLabel {
+  color: #412402;
+  font-weight: 500;
+}
+
+.cta {
+  margin-top: 14px;
+  width: 100%;
+  height: 46px;
+  border: none;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #412402;
+  background: linear-gradient(135deg, #c8722a, #e09040);
+  box-shadow: 0 6px 18px rgba(200, 114, 42, 0.28);
+  cursor: pointer;
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 200ms ease,
+    opacity 200ms ease;
+}
+
+.cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.cta:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ctaIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.ghost {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(242, 232, 216, 0.55);
+  text-align: center;
+  cursor: pointer;
+  transition: color 200ms ease;
+}
+
+.ghost:hover {
+  color: rgba(242, 232, 216, 0.85);
+}
+
+/* ── Confirmed state ───────────────────────────────────────────── */
+
+.confirmWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  width: 100%;
+}
+
+.bellGlow {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.bellGlow::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    rgba(217, 132, 59, 0.28) 0%,
+    rgba(217, 132, 59, 0) 70%
+  );
+  pointer-events: none;
+}
+
+.bellCircle {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: #382c21;
+  border: 2px solid #d9843b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ringPulse 1.8s ease-in-out infinite;
+}
+
+.bellIcon {
+  width: 26px;
+  height: 26px;
+  color: #d9843b;
+}
+
+@keyframes ringPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 132, 59, 0.35);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(217, 132, 59, 0);
+    transform: scale(1.03);
+  }
+}
+
+.metaBlock {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.metaLine {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(242, 232, 216, 0.65);
+  text-align: center;
+}
+
+.chip {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #382c21;
+  border: 1px solid rgba(242, 232, 216, 0.08);
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(245, 235, 220, 0.85);
+}
+
+.chipIcon {
+  width: 13px;
+  height: 13px;
+  color: #d9843b;
+  flex-shrink: 0;
+}
+
+.chipOnWay {
+  color: #d9843b;
+}
+
+.crossfadeEnter {
+  animation: crossfadeIn 250ms ease both;
+}
+
+.crossfadeExit {
+  animation: crossfadeOut 250ms ease both;
+}
+
+@keyframes crossfadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes crossfadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}

@@ -247,7 +247,7 @@ export function OrderNotificationStack({
           className={styles.moreOrders}
           onClick={onExpandOverflow}
         >
-          +{overflowCount} more order{overflowCount === 1 ? "" : "s"}
+          +{overflowCount} more alert{overflowCount === 1 ? "" : "s"}
         </button>
       )}
     </div>

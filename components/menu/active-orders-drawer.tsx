@@ -67,17 +67,21 @@ function ActiveOrderCard({
   order,
   onPayNow,
   onCallWaiter,
+  callWaiterDisabled,
+  callWaiterLabel,
 }: {
   order: Order
   onPayNow?: (order: Order) => void
   onCallWaiter?: (order: Order) => void
+  callWaiterDisabled?: boolean
+  callWaiterLabel?: string
 }) {
   const [expanded, setExpanded] = React.useState(false)
-  const [called, setCalled] = React.useState(false)
   const step = trackerStep(order)
   const count = orderItemCount(order)
   const total = orderTotal(order)
   const sentAt = order.lastSentAt ?? order.createdAt
+  const cooling = !!callWaiterDisabled
 
   return (
     <div
@@ -128,14 +132,18 @@ function ActiveOrderCard({
         <div className={styles.actions}>
           <button
             type="button"
-            className={cn(styles.ghostBtn, called && styles.ghostBtnCalled)}
+            className={cn(
+              styles.ghostBtn,
+              cooling && styles.ghostBtnCalled,
+              cooling && styles.ghostBtnDisabled
+            )}
+            disabled={cooling}
             onClick={() => {
-              setCalled(true)
+              if (cooling) return
               onCallWaiter?.(order)
-              setTimeout(() => setCalled(false), 2500)
             }}
           >
-            {called ? "Called ✓" : "Call waiter"}
+            {callWaiterLabel ?? (cooling ? "Waiter called ✓" : "Call waiter")}
           </button>
           {onPayNow && step < 3 && (
             <button
@@ -256,6 +264,8 @@ interface ActiveOrdersDrawerProps {
   onSelectOrder?: (order: Order) => void
   onPayNow?: (order: Order) => void
   onCallWaiter?: (order: Order) => void
+  callWaiterDisabled?: boolean
+  callWaiterLabel?: string
   onReorder?: (order: Order) => void
   children?: React.ReactNode
 }
@@ -267,6 +277,8 @@ export function ActiveOrdersDrawer({
   onOpenChange,
   onPayNow,
   onCallWaiter,
+  callWaiterDisabled,
+  callWaiterLabel,
   onReorder,
   children,
 }: ActiveOrdersDrawerProps) {
@@ -338,6 +350,8 @@ export function ActiveOrdersDrawer({
                       setOpen(false)
                     }}
                     onCallWaiter={onCallWaiter}
+                    callWaiterDisabled={callWaiterDisabled}
+                    callWaiterLabel={callWaiterLabel}
                   />
                 ))}
               </div>

@@ -344,6 +344,12 @@
   color: #d9843b;
 }
 
+.ghostBtnDisabled {
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
+}
+
 .payBtn {
   min-height: 38px;
   height: 38px;

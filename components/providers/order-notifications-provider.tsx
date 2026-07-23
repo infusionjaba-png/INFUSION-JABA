@@ -9,26 +9,29 @@ import {
   OrderNotificationStack,
   OrderNotificationStackItem,
 } from "@/components/orders/order-notification"
+import { WaiterCallNotification } from "@/components/orders/waiter-call-notification"
+import type { WaiterCall } from "@/lib/waiter-call"
 
 // ─── Acknowledgement helpers ──────────────────────────────────────────────────
 const ACK_KEY = "catha_notified_orders"
+const WAITER_ACK_KEY = "catha_notified_waiter_calls"
 const NOTIFY_WINDOW_MS = 10 * 60 * 1000 // orders sent in last 10 min
 const MAX_VISIBLE = 3
 
-function loadAcked(): Set<string> {
+function loadAcked(key = ACK_KEY): Set<string> {
   if (typeof window === "undefined") return new Set()
   try {
-    const stored = localStorage.getItem(ACK_KEY)
+    const stored = localStorage.getItem(key)
     if (stored) return new Set(JSON.parse(stored) as string[])
   } catch {}
   return new Set()
 }
 
-function saveAcked(set: Set<string>) {
+function saveAcked(set: Set<string>, key = ACK_KEY) {
   if (typeof window === "undefined") return
   try {
     const arr = [...set].slice(-200)
-    localStorage.setItem(ACK_KEY, JSON.stringify(arr))
+    localStorage.setItem(key, JSON.stringify(arr))
   } catch {}
 }
 
@@ -93,6 +96,8 @@ function normalizePopupOrder(
 interface OrderNotificationsContextType {
   soundEnabled: boolean
   setSoundEnabled: (enabled: boolean) => void
+  soundUnlocked: boolean
+  unlockSound: () => void
 }
 
 const OrderNotificationsContext = createContext<OrderNotificationsContextType | undefined>(undefined)
@@ -101,8 +106,29 @@ export function useOrderNotifications() {
   return useContext(OrderNotificationsContext)
 }
 
-/** Soft two-tone chime (not a harsh beep). */
-function playSoftChime() {
+const SOUND_UNLOCK_KEY = "catha_notify_sound_unlocked"
+
+function loadSoundUnlocked(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return sessionStorage.getItem(SOUND_UNLOCK_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+function saveSoundUnlocked() {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.setItem(SOUND_UNLOCK_KEY, "1")
+  } catch {}
+}
+
+function playTonePair(
+  freqs: [number, number],
+  peaks: [number, number],
+  gap = 0.14
+) {
   if (typeof window === "undefined") return
   try {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext
@@ -123,10 +149,20 @@ function playSoftChime() {
       osc.stop(start + dur + 0.02)
     }
 
-    tone(523.25, now, 0.22, 0.12) // C5
-    tone(659.25, now + 0.14, 0.28, 0.1) // E5
+    tone(freqs[0], now, 0.22, peaks[0])
+    tone(freqs[1], now + gap, 0.28, peaks[1])
     setTimeout(() => ctx.close().catch(() => {}), 800)
   } catch {}
+}
+
+/** Soft two-tone chime for new orders (not a harsh beep). */
+function playSoftChime() {
+  playTonePair([523.25, 659.25], [0.12, 0.1]) // C5 → E5
+}
+
+/** Softer, lower chime for waiter calls — distinct from new-order sound. */
+function playWaiterChime() {
+  playTonePair([392.0, 493.88], [0.07, 0.055], 0.18) // G4 → B4, quieter
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -134,7 +170,9 @@ export function OrderNotificationsProvider({ children }: { children: React.React
   const { data: session, status } = useSession()
   const pathname = usePathname()
   const [newOrderPopups, setNewOrderPopups] = useState<Order[]>([])
+  const [waiterCallPopups, setWaiterCallPopups] = useState<WaiterCall[]>([])
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [soundUnlocked, setSoundUnlocked] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [menuPriceById, setMenuPriceById] = useState<Record<string, number>>({})
 
@@ -144,13 +182,32 @@ export function OrderNotificationsProvider({ children }: { children: React.React
   const shouldShowNotifications = isAuthenticated && !isMenuPage && !isJabaPage
 
   const ackedRef = useRef<Set<string>>(new Set())
+  const waiterAckedRef = useRef<Set<string>>(new Set())
   const initializedRef = useRef(false)
+  const waiterInitializedRef = useRef(false)
   const menuPricesRef = useRef<Record<string, number>>({})
 
+  useEffect(() => {
+    setSoundUnlocked(loadSoundUnlocked())
+  }, [])
+
+  const unlockSound = useCallback(() => {
+    saveSoundUnlocked()
+    setSoundUnlocked(true)
+    setSoundEnabled(true)
+    // User gesture unlocks autoplay — play the softer waiter chime as confirmation
+    playWaiterChime()
+  }, [])
+
   const playSound = useCallback(() => {
-    if (!soundEnabled) return
+    if (!soundEnabled || !soundUnlocked) return
     playSoftChime()
-  }, [soundEnabled])
+  }, [soundEnabled, soundUnlocked])
+
+  const playWaiterSound = useCallback(() => {
+    if (!soundEnabled || !soundUnlocked) return
+    playWaiterChime()
+  }, [soundEnabled, soundUnlocked])
 
   // Warm a product-id → menu price map for NaN fallback
   useEffect(() => {
@@ -205,10 +262,24 @@ export function OrderNotificationsProvider({ children }: { children: React.React
     setNewOrderPopups((prev) => prev.filter((o) => o.orderId !== orderId))
   }, [])
 
+  const handleDismissWaiterCall = useCallback((callId: string) => {
+    setWaiterCallPopups((prev) => prev.filter((c) => c.callId !== callId))
+  }, [])
+
   /** Accept only — card animates out itself via onDismiss. */
   const handleAcceptOrder = useCallback(async (orderId: string) => {
     await acceptOrder(orderId)
   }, [acceptOrder])
+
+  const handleAcknowledgeWaiterCall = useCallback(async (callId: string) => {
+    try {
+      await fetch("/api/catha/waiter-calls", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, status: "acknowledged" }),
+      })
+    } catch {}
+  }, [])
 
   const handleViewOrder = useCallback((orderId: string) => {
     if (typeof window !== "undefined") {
@@ -272,22 +343,93 @@ export function OrderNotificationsProvider({ children }: { children: React.React
     return () => clearInterval(interval)
   }, [shouldShowNotifications, playSound])
 
-  const visible = showAll
+  // Poll waiter calls (distinct softer chime)
+  useEffect(() => {
+    if (!shouldShowNotifications) return
+
+    if (!waiterInitializedRef.current) {
+      waiterAckedRef.current = loadAcked(WAITER_ACK_KEY)
+      waiterInitializedRef.current = true
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/catha/waiter-calls?status=pending", {
+          cache: "no-store",
+        })
+        if (!res.ok) return
+        const calls: WaiterCall[] = await res.json()
+        if (!Array.isArray(calls)) return
+
+        const pendingIds = new Set(
+          calls.map((c) => c.callId || c.id).filter(Boolean)
+        )
+        const fresh: WaiterCall[] = []
+        for (const call of calls) {
+          const id = call.callId || call.id
+          if (!id || waiterAckedRef.current.has(id)) continue
+          if (call.status !== "pending") continue
+          waiterAckedRef.current.add(id)
+          fresh.push(call)
+        }
+
+        if (fresh.length > 0) {
+          saveAcked(waiterAckedRef.current, WAITER_ACK_KEY)
+          playWaiterSound()
+        }
+
+        setWaiterCallPopups((prev) => {
+          const kept = prev.filter((c) => pendingIds.has(c.callId))
+          const existing = new Set(kept.map((c) => c.callId))
+          const toAdd = fresh.filter((c) => !existing.has(c.callId))
+          if (toAdd.length === 0 && kept.length === prev.length) return prev
+          return toAdd.length > 0 ? [...toAdd.reverse(), ...kept] : kept
+        })
+      } catch {}
+    }
+
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [shouldShowNotifications, playWaiterSound])
+
+  const combinedCount = newOrderPopups.length + waiterCallPopups.length
+  // Prefer waiter calls (urgent) in the visible stack, then fill with orders
+  const waiterVisible = showAll
+    ? waiterCallPopups
+    : waiterCallPopups.slice(0, MAX_VISIBLE)
+  const visibleOrderSlots = showAll
+    ? newOrderPopups.length
+    : Math.max(0, MAX_VISIBLE - waiterVisible.length)
+  const ordersToShow = showAll
     ? newOrderPopups
-    : newOrderPopups.slice(0, MAX_VISIBLE)
+    : newOrderPopups.slice(0, visibleOrderSlots)
   const overflowCount = showAll
     ? 0
-    : Math.max(0, newOrderPopups.length - MAX_VISIBLE)
+    : Math.max(0, combinedCount - MAX_VISIBLE)
 
   return (
-    <OrderNotificationsContext.Provider value={{ soundEnabled, setSoundEnabled }}>
+    <OrderNotificationsContext.Provider
+      value={{ soundEnabled, setSoundEnabled, soundUnlocked, unlockSound }}
+    >
       {children}
-      {shouldShowNotifications && newOrderPopups.length > 0 && (
+      {shouldShowNotifications && combinedCount > 0 && (
         <OrderNotificationStack
           overflowCount={overflowCount}
           onExpandOverflow={() => setShowAll(true)}
         >
-          {visible.map((order) => (
+          {waiterVisible.map((call, index) => (
+            <OrderNotificationStackItem key={`wc-${call.callId}`}>
+              <WaiterCallNotification
+                call={call}
+                onDismiss={() => handleDismissWaiterCall(call.callId)}
+                onAcknowledge={() => handleAcknowledgeWaiterCall(call.callId)}
+                showEnableSound={!soundUnlocked && index === 0}
+                onEnableSound={unlockSound}
+              />
+            </OrderNotificationStackItem>
+          ))}
+          {ordersToShow.map((order) => (
             <OrderNotificationStackItem key={order.orderId}>
               <OrderNotification
                 order={order}
