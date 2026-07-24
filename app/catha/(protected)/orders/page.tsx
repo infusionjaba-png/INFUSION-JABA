@@ -1618,6 +1618,7 @@ export default function OrdersPage() {
   const handleServeMenuOrder = async (orderId: string) => {
     const serverName = (session?.user as any)?.name ?? "Server"
     try {
+      toast.loading("Marking served…", { id: "serve-order" })
       await fetch("/api/catha/menu-orders", {
         method: "PUT",
         cache: "no-store",
@@ -1643,8 +1644,10 @@ export default function OrdersPage() {
             : o
         )
       )
+      toast.success("Marked served — guest tab updated", { id: "serve-order" })
     } catch {
       console.error("Failed to mark order served")
+      toast.error("Could not mark served", { id: "serve-order" })
     }
   }
 
@@ -1908,12 +1911,14 @@ export default function OrdersPage() {
                   paymentReceiptSmsSentAt: (tx as any).paymentReceiptSmsSentAt ?? null,
                 }
                 // Accept only shows when not yet accepted (waiter still "Customer")
+                const payLabel = getStatusLabel((tx as any).paymentStatus || tx.status)
+                const unpaid = payLabel === "NOT_PAID" || payLabel === "PARTIALLY_PAID"
                 const isPendingMenuOrder =
-                  tx.status === "pending" &&
+                  unpaid &&
                   isMenuSource &&
                   (!waiterName || waiterName === "Customer")
                 const canServeMenuOrder =
-                  tx.status === "pending" &&
+                  unpaid &&
                   isMenuSource &&
                   !!waiterName &&
                   waiterName !== "Customer" &&
@@ -1935,6 +1940,24 @@ export default function OrdersPage() {
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Accept
+                        </button>
+                      </div>
+                    )}
+                    {canServeMenuOrder && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wide truncate">
+                            Preparing — mark when served
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleServeMenuOrder(tx.id)}
+                          className="flex items-center gap-1.5 bg-white text-orange-700 text-xs font-bold px-3 py-1 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Served
                         </button>
                       </div>
                     )}
@@ -2794,12 +2817,14 @@ export default function OrdersPage() {
                     }
                     
                     // Accept only shows when not yet accepted (waiter still "Customer")
+                    const payLabel = getStatusLabel((tx as any).paymentStatus || tx.status)
+                    const unpaid = payLabel === "NOT_PAID" || payLabel === "PARTIALLY_PAID"
                     const isPendingMenuOrder =
-                      tx.status === "pending" &&
+                      unpaid &&
                       isMenuSource &&
                       (!waiterName || waiterName === "Customer")
                     const canServeMenuOrder =
-                      tx.status === "pending" &&
+                      unpaid &&
                       isMenuSource &&
                       !!waiterName &&
                       waiterName !== "Customer" &&
@@ -2821,6 +2846,24 @@ export default function OrdersPage() {
                             >
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               Accept
+                            </button>
+                          </div>
+                        )}
+                        {canServeMenuOrder && (
+                          <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1 z-10 relative">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
+                              <span className="text-white text-xs font-bold truncate">
+                                Preparing — mark when served
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleServeMenuOrder(tx.id)}
+                              className="flex items-center gap-1 bg-white text-orange-700 text-xs font-bold px-2.5 py-1 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Served
                             </button>
                           </div>
                         )}

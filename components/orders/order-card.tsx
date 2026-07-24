@@ -256,14 +256,14 @@ export function OrderCard<T = any>({
         <div className="px-3 sm:px-5 py-2.5 sm:py-4 bg-[#f8fafc]">
           <div className="flex items-center gap-1.5 sm:gap-2">
             {onServe && (status === "NOT_PAID" || status === "PARTIALLY_PAID") && !order.servedAt && (
-              <ActionButton
-                variant="primary"
-                icon={CheckCircle2}
+              <Button
+                type="button"
                 onClick={() => onServe(callbackOrder)}
-                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm !bg-orange-500 hover:!bg-orange-600"
+                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold"
               >
+                <CheckCircle2 className="h-4 w-4 mr-1.5" />
                 Served
-              </ActionButton>
+              </Button>
             )}
             {(status === "NOT_PAID" || status === "PARTIALLY_PAID") && onPay && (
               <ActionButton
