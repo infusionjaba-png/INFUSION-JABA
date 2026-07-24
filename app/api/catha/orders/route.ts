@@ -168,9 +168,50 @@ export async function GET(request: Request) {
         buildOrdersListMongoFilter({ q, paymentMethod, paymentStatus, lifecycle })
       )
       const coll = db.collection('orders')
+      // Unaccepted /menu rounds (Accept banner) float to the top of every page.
+      const listPipeline = [
+        { $match: filter },
+        {
+          $addFields: {
+            _needsAccept: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$status', 'completed'] },
+                    { $ne: ['$status', 'cancelled'] },
+                    {
+                      $or: [
+                        { $eq: ['$orderSource', 'menu'] },
+                        {
+                          $and: [
+                            { $eq: ['$cashier', 'Customer'] },
+                            { $ne: [{ $ifNull: ['$customerPhone', null] }, null] },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      $or: [
+                        { $eq: [{ $ifNull: ['$waiter', ''] }, ''] },
+                        { $eq: ['$waiter', 'Customer'] },
+                      ],
+                    },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+        { $sort: { _needsAccept: -1, timestamp: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: { _needsAccept: 0 } },
+      ]
       const [total, rawList] = await Promise.all([
         coll.countDocuments(filter),
-        coll.find(filter).sort({ timestamp: -1 }).skip(skip).limit(limit).toArray(),
+        coll.aggregate(listPipeline).toArray(),
       ])
       const orders = rawList.map((order: any) => orderDocumentToJsonSafe(order))
       const res = NextResponse.json({ orders, total, limit, skip })

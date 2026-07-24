@@ -40,6 +40,30 @@ import { Textarea } from "@/components/ui/textarea"
 
 const ORDERS_PAGE_SIZE = 72
 
+/** Unaccepted /menu rounds (Accept banner) stay pinned above the rest. */
+function isUnacceptedMenuOrder(tx: Transaction): boolean {
+  const source =
+    (tx as any).orderSource ||
+    ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+  const waiter = (tx as any).waiter as string | undefined
+  return (
+    tx.status === "pending" &&
+    source === "menu" &&
+    (!waiter || waiter === "Customer")
+  )
+}
+
+function sortOrdersUnacceptedFirst(list: Transaction[]): Transaction[] {
+  return list.slice().sort((a, b) => {
+    const aTop = isUnacceptedMenuOrder(a) ? 1 : 0
+    const bTop = isUnacceptedMenuOrder(b) ? 1 : 0
+    if (aTop !== bTop) return bTop - aTop
+    const at = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp as any).getTime()
+    const bt = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp as any).getTime()
+    return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0)
+  })
+}
+
 function linkedMpesaPaymentTitle(p: { linkSource?: string | null }) {
   if (p.linkSource === "manual") return "Manual M-Pesa Transaction Added"
   if (p.linkSource === "automatic") return "Payment linked automatically"
@@ -517,20 +541,22 @@ export default function OrdersPage() {
       const rawOrders = Array.isArray(data.orders) ? data.orders : []
       const total = typeof data.total === "number" ? data.total : rawOrders.length
 
-      const processedOrders = rawOrders
-        .map((row: any) => {
-          try {
-            return mapOrderRow(row)
-          } catch (err) {
-            console.error("Failed to map order row", row?.id, err)
-            return null
-          }
-        })
-        .filter(Boolean)
-        .filter(
-          (o: Transaction, idx: number, arr: Transaction[]) =>
-            arr.findIndex((x: Transaction) => x.id === o.id) === idx,
-        ) as Transaction[]
+      const processedOrders = sortOrdersUnacceptedFirst(
+        (rawOrders
+          .map((row: any) => {
+            try {
+              return mapOrderRow(row)
+            } catch (err) {
+              console.error("Failed to map order row", row?.id, err)
+              return null
+            }
+          })
+          .filter(Boolean)
+          .filter(
+            (o: Transaction, idx: number, arr: Transaction[]) =>
+              arr.findIndex((x: Transaction) => x.id === o.id) === idx,
+          ) as Transaction[]),
+      )
 
       setTotalMatching(total)
       setOrders((prevOrders) => {
@@ -1580,7 +1606,9 @@ export default function OrdersPage() {
         body: JSON.stringify({ id: orderId, waiter: serverName }),
       })
       setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, waiter: serverName } : o))
+        sortOrdersUnacceptedFirst(
+          prev.map((o) => (o.id === orderId ? { ...o, waiter: serverName } : o)),
+        ),
       )
     } catch {
       console.error("Failed to accept order")
