@@ -110,7 +110,24 @@ function MenuContent() {
   }, [])
 
   useEffect(() => {
-    const onScroll = () => setHeaderScrolled(window.scrollY > 48)
+    // Hysteresis prevents sticky-header flicker: collapsing the hero
+    // shortens the document, which can drop scrollY below a single
+    // threshold and immediately expand again (oscillation).
+    let collapsed = false
+    const COLLAPSE_AT = 160 // must exceed hero collapse height (~8rem)
+    const EXPAND_AT = 12
+
+    const onScroll = () => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0
+      if (!collapsed && y >= COLLAPSE_AT) {
+        collapsed = true
+        setHeaderScrolled(true)
+      } else if (collapsed && y <= EXPAND_AT) {
+        collapsed = false
+        setHeaderScrolled(false)
+      }
+    }
+
     onScroll()
     window.addEventListener("scroll", onScroll, { passive: true })
     return () => window.removeEventListener("scroll", onScroll)

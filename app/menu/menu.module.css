@@ -94,6 +94,8 @@
   position: sticky;
   top: 0;
   z-index: 40;
+  /* Avoid browser scroll-anchoring fighting sticky collapse */
+  overflow-anchor: none;
   transition:
     background var(--eo-duration) var(--eo-ease),
     box-shadow var(--eo-duration) var(--eo-ease),
@@ -200,6 +202,7 @@
 .heroBlock {
   padding: 0.85rem 0 0.35rem;
   overflow: hidden;
+  overflow-anchor: none;
   transition:
     max-height var(--eo-duration) var(--eo-ease),
     opacity var(--eo-duration) var(--eo-ease),
