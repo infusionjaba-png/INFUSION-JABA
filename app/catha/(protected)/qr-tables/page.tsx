@@ -53,8 +53,15 @@ export default function QRTablesPage() {
     return `${baseUrl}/menu?t=${encodeURIComponent(String(tableId))}`
   }
 
-  const getQRImageUrl = (url: string, size = 300) => {
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(url)}&format=png&margin=10`
+  const getQRImageUrl = (url: string, size = 300, absolute = false) => {
+    // Brand-colored QR via our generator (Infusion Jaba logo green)
+    const path = `/api/qr?size=${size}&url=${encodeURIComponent(url)}`
+    if (!absolute) return path
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : baseUrl.replace(/\/$/, "")
+    return `${origin}${path}`
   }
 
   const handleAddTable = async () => {
@@ -125,7 +132,7 @@ export default function QRTablesPage() {
 
   const printSingle = (table: TableData) => {
     const url = getMenuUrl(table.id)
-    const qrUrl = getQRImageUrl(url, 256)
+    const qrUrl = getQRImageUrl(url, 256, true)
     const w = window.open("", "_blank")
     if (!w) {
       toast.error("Please allow popups to print")
@@ -161,7 +168,7 @@ export default function QRTablesPage() {
       <div style="display:inline-block;margin:16px;text-align:center;page-break-inside:avoid;">
         <h3 style="margin:0 0 8px;">${t.name || `Table ${t.id}`}</h3>
         <p style="margin:0 0 12px;font-size:14px;color:#64748b;">Scan to order</p>
-        <img src="${getQRImageUrl(getMenuUrl(t.id), 200)}" width="200" height="200" alt="QR" />
+        <img src="${getQRImageUrl(getMenuUrl(t.id), 200, true)}" width="200" height="200" alt="QR" />
         <p style="margin:8px 0 0;font-size:12px;color:#94a3b8;">Table ${t.id}</p>
       </div>
     `

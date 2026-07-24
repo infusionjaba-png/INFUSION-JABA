@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import QRCode from "qrcode"
+import { JABA_QR_DARK, JABA_QR_LIGHT } from "@/lib/jaba-brand-colors"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -8,13 +9,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid url" }, { status: 400 })
   }
 
+  const sizeRaw = parseInt(searchParams.get("size") || "320", 10)
+  const width = Number.isFinite(sizeRaw) ? Math.min(Math.max(sizeRaw, 64), 1024) : 320
+
   try {
     const buffer = await QRCode.toBuffer(url, {
       type: "png",
-      width: 320,
-      margin: 1,
+      width,
+      margin: 2,
       errorCorrectionLevel: "M",
-      color: { dark: "#064e3b", light: "#ffffff" },
+      color: { dark: JABA_QR_DARK, light: JABA_QR_LIGHT },
     })
     return new NextResponse(buffer, {
       headers: {
