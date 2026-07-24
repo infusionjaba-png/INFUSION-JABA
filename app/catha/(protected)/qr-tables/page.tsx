@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { QrCode, Plus, Download, Printer, Loader2, Trash2, Grid3X3 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { BrandedQrGenerator } from "@/components/branded-qr"
 
 interface TableData {
   id: number
@@ -214,6 +215,25 @@ export default function QRTablesPage() {
       <Header title="Table QR Codes" subtitle="Generate, download, and print QR codes for your tables" />
 
       <div className="flex-1 p-4 sm:p-6 pb-8 sm:pb-6 space-y-4 sm:space-y-6">
+        <Card className="overflow-hidden border-[#E7E7E7]">
+          <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-2">
+            <CardTitle className="text-base sm:text-lg">Infusion&apos;s Jaba branded emblem</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">
+              Generate a scannable QR with logo colors, rounded modules, custom finders, and decorative ring.
+              Prefills with a table menu link when tables exist.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6 pt-2">
+            <BrandedQrGenerator
+              initialValue={
+                tables[0]
+                  ? getMenuUrl(tables[0].id)
+                  : `${baseUrl}/menu`
+              }
+            />
+          </CardContent>
+        </Card>
+
         <Card className="overflow-hidden">
           <CardHeader className="p-4 sm:p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
