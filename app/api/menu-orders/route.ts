@@ -220,16 +220,15 @@ export async function PUT(request: Request) {
     if (syncStatus === "sent" || syncStatus === "active" || syncStatus === "paid") {
       try {
         const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
+        const hasExplicitServe = Boolean(updated?.servedAt)
         await upsertAdminOrderFromMenuOrder(db, updated, {
           waiter: updated?.receivedBy || "Customer",
-          ...(syncStatus === "active"
+          ...(hasExplicitServe
             ? {
-                servedAt: updated?.servedAt
-                  ? new Date(updated.servedAt as any)
-                  : new Date(),
-                servedBy: updated?.receivedBy || "Server",
+                servedAt: new Date(updated.servedAt as any),
+                servedBy: updated?.servedBy || updated?.receivedBy || "Server",
               }
-            : {}),
+            : { servedAt: null }),
         })
       } catch (syncErr) {
         console.error("[menu-orders] admin sync failed", syncErr)

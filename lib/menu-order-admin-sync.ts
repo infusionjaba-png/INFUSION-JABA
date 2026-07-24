@@ -9,6 +9,106 @@ function asDate(value: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
+function isPaidMenuOrder(menuOrder: any): boolean {
+  const statusLower = String(menuOrder.status || "").toLowerCase()
+  return (
+    String(menuOrder.paymentStatus || "").toUpperCase() === "PAID" ||
+    statusLower === "paid"
+  )
+}
+
+/** Explicit staff Serve sets menu_orders.servedAt — legacy Accept only set status=active. */
+export function menuOrderIsExplicitlyServed(menuOrder: any): boolean {
+  return Boolean(asDate(menuOrder?.servedAt))
+}
+
+/**
+ * Old Accept set status "active" (= guest "Served") without servedAt.
+ * Roll those unpaid rounds back to "sent" (Preparing) until staff clicks Served.
+ */
+export async function repairPrematureMenuServed(db: Db): Promise<{ repaired: number }> {
+  const premature = await db
+    .collection("menu_orders")
+    .find({
+      status: "active",
+      paymentStatus: { $nin: ["PAID", "paid"] },
+      $or: [{ servedAt: { $exists: false } }, { servedAt: null }],
+    })
+    .limit(200)
+    .toArray()
+
+  let repaired = 0
+  for (const mo of premature) {
+    const orderId = String(mo.orderId || "").trim()
+    if (!orderId) continue
+    try {
+      await db.collection("menu_orders").updateOne(
+        { orderId },
+        {
+          $set: { status: "sent", updatedAt: new Date() },
+          $unset: { servedBy: "" },
+        }
+      )
+      await db.collection("orders").updateOne(
+        { id: orderId },
+        {
+          $set: {
+            paymentNote: "Menu order — awaiting payment",
+            updatedAt: new Date(),
+          },
+          $unset: { servedAt: "", servedBy: "" },
+        }
+      )
+      repaired += 1
+    } catch (err) {
+      console.error("[menu-order-admin-sync] premature-serve repair failed", orderId, err)
+    }
+  }
+
+  // Also clear admin servedAt when menu is sent/preparing (stale backfill stamps)
+  const staleAdmin = await db
+    .collection("orders")
+    .find({
+      orderSource: "menu",
+      status: "pending",
+      servedAt: { $exists: true, $ne: null },
+    })
+    .limit(200)
+    .toArray()
+
+  for (const admin of staleAdmin) {
+    const id = String(admin.id || "").trim()
+    if (!id) continue
+    const menu = await db.collection("menu_orders").findOne({ orderId: id })
+    if (!menu) continue
+    if (menuOrderIsExplicitlyServed(menu)) continue
+    if (isPaidMenuOrder(menu)) continue
+    try {
+      await db.collection("orders").updateOne(
+        { id },
+        {
+          $set: {
+            paymentNote: "Menu order — awaiting payment",
+            updatedAt: new Date(),
+          },
+          $unset: { servedAt: "", servedBy: "" },
+        }
+      )
+      if (String(menu.status || "").toLowerCase() === "active") {
+        await db.collection("menu_orders").updateOne(
+          { orderId: id },
+          { $set: { status: "sent", updatedAt: new Date() } }
+        )
+      }
+      repaired += 1
+    } catch (err) {
+      console.error("[menu-order-admin-sync] stale servedAt clear failed", id, err)
+    }
+  }
+
+  return { repaired }
+}
+
 /** Upsert a menu round into admin `orders` so it appears on /catha/orders. */
 export async function upsertAdminOrderFromMenuOrder(
   db: Db,
@@ -37,10 +137,7 @@ export async function upsertAdminOrderFromMenuOrder(
 
   const tableRaw = menuOrder.tableId ?? menuOrder.tableNumber ?? ""
   const tableNum = parseInt(String(tableRaw), 10)
-  const statusLower = String(menuOrder.status || "").toLowerCase()
-  const paid =
-    String(menuOrder.paymentStatus || "").toUpperCase() === "PAID" ||
-    statusLower === "paid"
+  const paid = isPaidMenuOrder(menuOrder)
 
   const phone =
     menuOrder.customerPhone ?? menuOrder.customerNumber ?? null
@@ -50,23 +147,16 @@ export async function upsertAdminOrderFromMenuOrder(
     menuOrder.receivedBy ??
     "Customer"
 
-  const existingAdmin = await db.collection("orders").findOne({ id })
-  const menuLooksServed = statusLower === "active"
-  const inferredServedAt =
+  // Served only when staff explicitly marked it (opts or menu.servedAt) — not bare status=active.
+  const explicitServedAt =
     opts?.servedAt !== undefined
       ? opts.servedAt
-      : asDate(existingAdmin?.servedAt) ||
-        (menuLooksServed
-          ? asDate(menuOrder.servedAt) ||
-            asDate(menuOrder.updatedAt) ||
-            asDate(menuOrder.lastSentAt) ||
-            new Date()
-          : null)
+      : asDate(menuOrder.servedAt)
+
   const servedBy =
     opts?.servedBy ??
-    existingAdmin?.servedBy ??
     menuOrder.servedBy ??
-    (inferredServedAt ? waiter : null)
+    (explicitServedAt ? waiter : null)
 
   const $set: Record<string, unknown> = {
     id,
@@ -80,7 +170,7 @@ export async function upsertAdminOrderFromMenuOrder(
     paymentStatus: paid ? "PAID" : "NOT_PAID",
     paymentNote: paid
       ? "Paid via menu"
-      : inferredServedAt
+      : explicitServedAt
         ? "Served — waiting payment"
         : "Menu order — awaiting payment",
     cashier: "Customer",
@@ -90,9 +180,13 @@ export async function upsertAdminOrderFromMenuOrder(
     updatedAt: new Date(),
   }
 
-  if (inferredServedAt) {
-    $set.servedAt = inferredServedAt
+  const $unset: Record<string, string> = {}
+  if (explicitServedAt) {
+    $set.servedAt = explicitServedAt
     $set.servedBy = servedBy ?? waiter
+  } else if (!paid) {
+    $unset.servedAt = ""
+    $unset.servedBy = ""
   }
 
   if (menuOrder.mpesaReceiptNumber) {
@@ -103,6 +197,7 @@ export async function upsertAdminOrderFromMenuOrder(
     { id },
     {
       $set,
+      ...(Object.keys($unset).length ? { $unset } : {}),
       $setOnInsert: {
         timestamp:
           asDate(menuOrder.createdAt) ||
@@ -117,14 +212,17 @@ export async function upsertAdminOrderFromMenuOrder(
 
 /**
  * Backfill open menu rounds onto admin `orders` (covers rounds created before sync existed).
- * Returns how many menu docs were upserted.
+ * Also repairs premature "Served" from the old Accept flow.
  */
-export async function syncOpenMenuOrdersToAdmin(db: Db): Promise<{ synced: number }> {
+export async function syncOpenMenuOrdersToAdmin(
+  db: Db
+): Promise<{ synced: number; repaired: number }> {
+  const { repaired } = await repairPrematureMenuServed(db)
+
   const open = await db
     .collection("menu_orders")
     .find({
       status: { $in: ["sent", "active"] },
-      // Treat missing / UNPAID / NOT_PAID as open; only skip paid rounds
       paymentStatus: { $nin: ["PAID", "paid"] },
     })
     .limit(200)
@@ -133,19 +231,15 @@ export async function syncOpenMenuOrdersToAdmin(db: Db): Promise<{ synced: numbe
   let synced = 0
   for (const mo of open) {
     try {
-      const statusLower = String(mo.status || "").toLowerCase()
+      const explicitlyServed = menuOrderIsExplicitlyServed(mo)
       await upsertAdminOrderFromMenuOrder(db, mo, {
         waiter: mo.receivedBy || "Customer",
-        ...(statusLower === "active"
+        ...(explicitlyServed
           ? {
-              servedAt:
-                asDate(mo.servedAt) ||
-                asDate(mo.updatedAt) ||
-                asDate(mo.lastSentAt) ||
-                new Date(),
-              servedBy: mo.receivedBy || mo.servedBy || "Server",
+              servedAt: asDate(mo.servedAt)!,
+              servedBy: mo.servedBy || mo.receivedBy || "Server",
             }
-          : {}),
+          : { servedAt: null }),
       })
       synced += 1
     } catch (err) {
@@ -153,5 +247,5 @@ export async function syncOpenMenuOrdersToAdmin(db: Db): Promise<{ synced: numbe
     }
   }
 
-  return { synced }
+  return { synced, repaired }
 }

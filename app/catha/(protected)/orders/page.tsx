@@ -1623,7 +1623,13 @@ export default function OrdersPage() {
         method: "PUT",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, status: "active", receivedBy: serverName }),
+        body: JSON.stringify({
+          orderId,
+          status: "active",
+          receivedBy: serverName,
+          servedAt: new Date().toISOString(),
+          servedBy: serverName,
+        }),
       })
       const servedAt = new Date().toISOString()
       await fetch("/api/catha/orders", {

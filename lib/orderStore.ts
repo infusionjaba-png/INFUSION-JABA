@@ -85,6 +85,13 @@ function normalizeOrder(o: any): Order {
     customerNumber: o.customerNumber ?? o.customerPart ?? null,
     guestSessionId: o.guestSessionId ?? null,
     lastSentAt: o.lastSentAt ?? undefined,
+    servedAt:
+      o.servedAt == null
+        ? undefined
+        : typeof o.servedAt === "number"
+          ? o.servedAt
+          : new Date(o.servedAt).getTime(),
+    servedBy: o.servedBy ?? undefined,
     updatedAt: o.updatedAt ?? o.createdAt ?? Date.now(),
     items: normalizeCartItems(o.items),
     total: Number(o.total) || 0,

@@ -59,6 +59,9 @@ export interface Order {
   subtotal?: number
   lastSentAt?: number // when "Send Now" was clicked
   receivedBy?: string
+  /** Set only when staff taps Served on /catha/orders */
+  servedAt?: number | string | null
+  servedBy?: string | null
   cancelledReason?: string
 }
 

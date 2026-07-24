@@ -54,6 +54,12 @@ export async function GET() {
           : new Date(order.lastSentAt).getTime()
         : undefined,
       receivedBy: order.receivedBy,
+      servedAt: order.servedAt
+        ? order.servedAt instanceof Date
+          ? order.servedAt.getTime()
+          : new Date(order.servedAt).getTime()
+        : undefined,
+      servedBy: order.servedBy ?? null,
       cancelledReason: order.cancelledReason,
       mpesaReceiptNumber: order.mpesaReceiptNumber ?? null,
     }))
@@ -261,6 +267,18 @@ export async function PUT(request: Request) {
     if (updateData.status === "sent" || updateData.status === "active") {
       updateData.lastSentAt = new Date()
     }
+    // Explicit Serve: stamp servedAt on menu_orders (legacy Accept only set status=active).
+    if (updateData.status === "active" && updateData.servedAt == null) {
+      updateData.servedAt = new Date()
+      if (updateData.servedBy == null) {
+        updateData.servedBy =
+          typeof updateData.receivedBy === "string"
+            ? updateData.receivedBy
+            : (session.user as any)?.name ?? "Server"
+      }
+    } else if (updateData.servedAt != null) {
+      updateData.servedAt = new Date(updateData.servedAt as any)
+    }
 
     const result = await db
       .collection("menu_orders")
@@ -279,14 +297,25 @@ export async function PUT(request: Request) {
           ? updateData.receivedBy
           : (session.user as any)?.name ?? null
       const isServe = updateData.status === "active"
+      const servedAt = updated?.servedAt
+        ? updated.servedAt instanceof Date
+          ? updated.servedAt
+          : new Date(updated.servedAt as any)
+        : isServe
+          ? new Date()
+          : null
       await upsertAdminOrderFromMenuOrder(db, updated, {
         waiter: serverName || updated?.receivedBy || undefined,
-        ...(isServe
+        ...(isServe && servedAt
           ? {
-              servedAt: new Date(),
-              servedBy: serverName || updated?.receivedBy || "Server",
+              servedAt,
+              servedBy:
+                (typeof updateData.servedBy === "string" && updateData.servedBy) ||
+                serverName ||
+                updated?.receivedBy ||
+                "Server",
             }
-          : {}),
+          : { servedAt: null }),
       })
     } catch (syncErr) {
       console.error("[menu-orders] admin sync failed", syncErr)

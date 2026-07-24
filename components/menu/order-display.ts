@@ -51,7 +51,9 @@ export function itemsSummary(order: Order): string {
 /** Tracker step index: 0 Sent, 1 Preparing, 2 Served, 3 Paid */
 export function trackerStep(order: Order): number {
   if (order.paymentStatus === "PAID" || order.status === "paid") return 3
-  if (order.status === "active") return 2
+  // Served only after explicit staff Serve (menu_orders.servedAt). Bare "active" was old Accept.
+  if (order.status === "active" && order.servedAt) return 2
+  if (order.status === "active") return 1
   if (order.status === "sent") return 1
   return 0
 }

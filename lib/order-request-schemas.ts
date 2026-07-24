@@ -161,6 +161,8 @@ export const menuOrderPutSchema = z
     items: z.array(minimalInventoryLineSchema).max(200).optional(),
     customerPhone: z.union([z.string().max(40), z.null()]).optional(),
     receivedBy: z.union([z.string().max(200), z.null()]).optional(),
+    servedAt: z.union([z.string().max(80), z.date(), z.null()]).optional(),
+    servedBy: z.union([z.string().max(200), z.null()]).optional(),
   })
   .strict()
 
