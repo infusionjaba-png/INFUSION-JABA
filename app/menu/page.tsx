@@ -56,9 +56,13 @@ function getOrCreateGuestSessionId(): string {
 function MenuContent() {
   const searchParams = useSearchParams()
   const tableFromQuery = searchParams.get("t") || searchParams.get("table")
-  const tableRef = useRef<string | null>(null)
+  // Apply ?t= on first paint so QR scans never flash the manual table gate.
+  const initialTableFromQuery = tableFromQuery ? String(tableFromQuery).trim() : ""
+  const tableRef = useRef<string | null>(initialTableFromQuery || null)
 
-  const [tableNumber, setTableNumber] = useState<string>("")
+  const [tableNumber, setTableNumber] = useState<string>(initialTableFromQuery)
+  // When URL has no table, wait one tick for sessionStorage before showing the gate.
+  const [tableBootstrapped, setTableBootstrapped] = useState(!!initialTableFromQuery)
   const [manualTableInput, setManualTableInput] = useState("")
   const [manualTableError, setManualTableError] = useState("")
   const [customerNumber, setCustomerNumber] = useState<string | null>(null)
@@ -195,41 +199,40 @@ function MenuContent() {
       .finally(() => setMenuLoading(false))
   }, [])
 
-  // Parse table from URL
+  // Keep table in sync with URL / session (URL already applied on first paint when ?t= is present)
   useEffect(() => {
     if (tableFromQuery) {
       const t = String(tableFromQuery).trim()
-      setTableNumber(t)
-      tableRef.current = t
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(MENU_TABLE_KEY, t)
+      if (t !== tableRef.current) {
+        setTableNumber(t)
+        tableRef.current = t
       }
-    } else if (typeof window !== "undefined") {
-      const stored = sessionStorage.getItem(MENU_TABLE_KEY)
-      if (stored) {
-        setTableNumber(stored)
-        tableRef.current = stored
-      }
+      sessionStorage.setItem(MENU_TABLE_KEY, t)
+      setTableBootstrapped(true)
+      return
     }
+    const stored = sessionStorage.getItem(MENU_TABLE_KEY)?.trim()
+    if (stored) {
+      setTableNumber(stored)
+      tableRef.current = stored
+    }
+    setTableBootstrapped(true)
   }, [tableFromQuery])
 
-  // Restore phone from session
+  // Restore phone from session; only prompt when still needed
   useEffect(() => {
-    if (typeof window === "undefined") return
     const cust = sessionStorage.getItem("menu_customer_number")
     if (cust) {
       setCustomerNumber(cust)
       setGuestSessionId(null)
       setCustomerNumberResolved(true)
+      setShowCustomerModal(false)
+      return
     }
-  }, [])
-
-  // Auto-show phone modal as soon as we have a table but no resolved customer yet
-  useEffect(() => {
-    if (tableNumber && !customerNumberResolved) {
+    if (tableNumber) {
       setShowCustomerModal(true)
     }
-  }, [tableNumber, customerNumberResolved])
+  }, [tableNumber])
 
   // Track active unpaid order. Hydrate cart from draft ONCE — never overwrite
   // local cart on every store notify (that caused add/remove flicker).
@@ -797,6 +800,16 @@ function MenuContent() {
   )
 
   const cartItemCount = cart.reduce((s, i) => s + i.quantity, 0)
+
+  // Avoid flashing "enter table number" while restoring from session (no ?t= yet)
+  if (!tableBootstrapped) {
+    return (
+      <div className={styles.loader}>
+        <div className={styles.spinner} />
+        <p className="text-[rgba(242,232,216,0.65)] text-sm">Loading menu...</p>
+      </div>
+    )
+  }
 
   // ─── No table: QR scan prompt + manual entry ─────────────────────────────
   if (!tableNumber) {
