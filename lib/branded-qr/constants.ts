@@ -12,7 +12,7 @@ export const DEFAULT_BRANDED_LOGO_SRC = "/branding/infusions-jaba-logo.png"
 /** Quiet zone in modules (QR spec minimum is 4). */
 export const QUIET_ZONE_MODULES = 4
 
-/** Center logo badge diameter as fraction of matrix width (≤ ~18%). */
-export const LOGO_BADGE_FRACTION = 0.16
+/** Center logo badge diameter as fraction of matrix width (15–17%, never >18%). */
+export const LOGO_BADGE_FRACTION = 0.165
 
 export const MAX_SAFE_PAYLOAD_CHARS = 800
