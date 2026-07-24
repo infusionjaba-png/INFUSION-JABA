@@ -17,6 +17,7 @@ import { PopularRow } from "@/components/menu/PopularRow"
 import { ProductSheet } from "@/components/menu/ProductSheet"
 import { StickyCartBar } from "@/components/menu/StickyCartBar"
 import { PaymentModal } from "@/components/menu/payment-modal"
+import { MenuReceiptSheet, type MenuReceiptPayload } from "@/components/menu/menu-receipt-sheet"
 import { OrderTracking } from "@/components/menu/order-tracking"
 import { OrderHistoryDrawer } from "@/components/menu/order-history-drawer"
 import { ActiveOrdersDrawer } from "@/components/menu/active-orders-drawer"
@@ -81,6 +82,8 @@ function MenuContent() {
   const [callWaiterOrderId, setCallWaiterOrderId] = useState<string | null>(null)
   /** When set, Pay Tab settles every listed unpaid round after M-Pesa success */
   const [tabCheckoutIds, setTabCheckoutIds] = useState<string[]>([])
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [receiptPayload, setReceiptPayload] = useState<MenuReceiptPayload | null>(null)
   const [orderSentConfirm, setOrderSentConfirm] = useState<{
     orderLabel: string
     tableNumber: string
@@ -527,17 +530,58 @@ function MenuContent() {
 
   const handlePaymentSuccess = useCallback(async (
     method: "mpesa" | "cash",
-    mpesaReceiptNumber?: string
+    mpesaReceiptNumber?: string,
+    paidPhone?: string
   ) => {
     const cust = customerNumber ?? null
     const guest = customerNumber == null ? guestSessionId : null
-    const normalizedCustomerPhone = normalizeKenyaPhone(customerNumber ?? "") ?? customerNumber ?? null
+    const normalizedCustomerPhone =
+      normalizeKenyaPhone(paidPhone ?? customerNumber ?? "") ??
+      paidPhone ??
+      customerNumber ??
+      null
+
+    const openReceiptFromConfirm = async (orderIds: string[]) => {
+      try {
+        const res = await fetch("/api/menu-orders/confirm-payment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderIds,
+            phone: normalizedCustomerPhone,
+            mpesaReceiptNumber: mpesaReceiptNumber ?? null,
+            tableNumber,
+          }),
+        })
+        const data = await res.json()
+        if (res.ok && data?.ok) {
+          setReceiptPayload({
+            primaryOrderId: data.primaryOrderId,
+            receiptUrl: data.receiptUrl,
+            total: data.total,
+            roundCount: data.roundCount,
+            tableNumber: data.tableNumber || tableNumber,
+            paidAt: data.paidAt || Date.now(),
+            items: Array.isArray(data.items) ? data.items : [],
+            mpesaReceiptNumber: mpesaReceiptNumber ?? null,
+            sms: data.sms || { sent: false },
+          })
+          setReceiptOpen(true)
+          return true
+        }
+      } catch (e) {
+        console.error("[menu] confirm-payment failed", e)
+      }
+      return false
+    }
 
     // ── Pay Tab: settle every open round with one payment ──────────
     if (tabCheckoutIds.length > 0 && method === "mpesa") {
+      const ids = [...tabCheckoutIds]
+      // Local optimistic update (confirm-payment also writes server)
       const paidAt = Date.now()
       await Promise.all(
-        tabCheckoutIds.map((orderId) =>
+        ids.map((orderId) =>
           orderStore.updateOrder(orderId, {
             paymentStatus: "PAID" as const,
             status: "paid" as const,
@@ -549,13 +593,13 @@ function MenuContent() {
         )
       )
       setTabCheckoutIds([])
-      setPlacedOrderId(tabCheckoutIds[0] ?? null)
+      setPlacedOrderId(ids[0] ?? null)
       setActiveOrder(null)
       setCart([])
       setShowPaymentModal(false)
       setCartOpen(false)
       setShowOrderTracking(false)
-      setActiveOrdersOpen(true)
+      await openReceiptFromConfirm(ids)
       return
     }
 
@@ -564,6 +608,8 @@ function MenuContent() {
     // If activeOrder is already sent/active, the cart is a NEW order — always create fresh
     const isSentOrder = resolvedActiveOrder &&
       (resolvedActiveOrder.status === "sent" || resolvedActiveOrder.status === "active")
+
+    let settledId: string | null = null
 
     if (resolvedActiveOrder && !isSentOrder) {
       // Existing draft order — update it
@@ -580,11 +626,10 @@ function MenuContent() {
           : { status: "sent" as const, paymentMethod: "cash" as const, lastSentAt: Date.now() }
       await orderStore.updateOrder(resolvedActiveOrder.orderId, patch)
       setPlacedOrderId(resolvedActiveOrder.orderId)
-      // Always clear cart — the order is now sent/paid, it lives in Orders
+      settledId = method === "mpesa" ? resolvedActiveOrder.orderId : null
       setCart([])
       if (method === "mpesa") setActiveOrder(null)
     } else if (resolvedActiveOrder && isSentOrder && method === "mpesa" && cart.length === 0) {
-      // Pay existing sent cash order via M-Pesa (cash → M-Pesa switch from order tracking)
       await orderStore.updateOrder(resolvedActiveOrder.orderId, {
         paymentStatus: "PAID" as const,
         status: "paid" as const,
@@ -594,9 +639,9 @@ function MenuContent() {
         customerPhone: normalizedCustomerPhone ?? undefined,
       } as any)
       setPlacedOrderId(resolvedActiveOrder.orderId)
+      settledId = resolvedActiveOrder.orderId
       setActiveOrder(null)
     } else if (isSentOrder && cart.length > 0) {
-      // Cart has new items on top of an existing sent order → brand new order
       const order = await orderStore.createOrder({
         tableId: tableNumber,
         tableNumber,
@@ -612,6 +657,7 @@ function MenuContent() {
         ...(mpesaReceiptNumber ? { mpesaReceiptNumber } : {}),
       } as any)
       setPlacedOrderId(order.orderId)
+      settledId = method === "mpesa" ? order.orderId : null
       setCart([])
     } else if (cart.length > 0) {
       const order = await orderStore.createOrder({
@@ -629,7 +675,7 @@ function MenuContent() {
         ...(mpesaReceiptNumber ? { mpesaReceiptNumber } : {}),
       } as any)
       setPlacedOrderId(order.orderId)
-      // Always clear cart after sending
+      settledId = method === "mpesa" ? order.orderId : null
       setCart([])
       if (method === "mpesa") setActiveOrder(null)
     }
@@ -637,8 +683,11 @@ function MenuContent() {
     setTabCheckoutIds([])
     setShowPaymentModal(false)
     setCartOpen(false)
-    // Paid orders land in history; unpaid/sent stay trackable via Active Orders
-    if (method === "mpesa") {
+
+    if (method === "mpesa" && settledId) {
+      setShowOrderTracking(false)
+      await openReceiptFromConfirm([settledId])
+    } else if (method === "mpesa") {
       setShowOrderTracking(false)
       setActiveOrdersOpen(true)
     } else {
@@ -1101,6 +1150,18 @@ function MenuContent() {
         tableNumber={tableNumber}
         customerPhone={customerNumber}
         orderId={callWaiterOrderId ?? activeOrder?.orderId ?? null}
+      />
+
+      <MenuReceiptSheet
+        open={receiptOpen}
+        onOpenChange={(open) => {
+          setReceiptOpen(open)
+          if (!open) {
+            setReceiptPayload(null)
+            setActiveOrdersOpen(true)
+          }
+        }}
+        receipt={receiptPayload}
       />
 
       <PaymentModal

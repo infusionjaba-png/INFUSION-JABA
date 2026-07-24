@@ -14,7 +14,11 @@ interface PaymentModalProps {
   amount: number
   phone?: string
   orderMeta?: string
-  onSuccess: (method: "mpesa" | "cash", mpesaReceiptNumber?: string) => void
+  onSuccess: (
+    method: "mpesa" | "cash",
+    mpesaReceiptNumber?: string,
+    paidPhone?: string
+  ) => void
   /** Skip the choose screen and go straight to M-Pesa */
   skipToMpesa?: boolean
   /** Hide cash option entirely — for orders already at the bar */
@@ -132,7 +136,7 @@ export function PaymentModal({
               tx.mpesaReceiptNumber || tx.mpesa_receipt_number || tx.MpesaReceiptNumber || undefined
             setStep("success")
             setTimeout(() => {
-              onSuccess("mpesa", receipt)
+              onSuccess("mpesa", receipt, phoneNumber.trim())
               setStep("settle")
               onOpenChange(false)
             }, 1800)
