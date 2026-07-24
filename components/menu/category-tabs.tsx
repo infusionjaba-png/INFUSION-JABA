@@ -2,17 +2,8 @@
 
 import React, { memo, useRef, useEffect } from "react"
 import { MenuCategory } from "@/types/menu"
-import {
-  Leaf,
-  Beer,
-  Wine,
-  Martini,
-  CupSoda,
-  Zap,
-  GlassWater,
-  LayoutGrid,
-} from "lucide-react"
 import { cn } from "@/lib/utils"
+import { categoryIconFor, IconJaba } from "./category-icons"
 import styles from "./category-tabs.module.css"
 
 interface CategoryTabsProps {
@@ -26,26 +17,11 @@ interface CategoryTabsProps {
 }
 
 const shortLabelMap: Record<string, string> = {
-  "soft-drinks": "Soft",
+  "soft-drinks": "Soft drinks",
   "energy-drinks": "Energy",
-  cocktails: "Mixes",
-  whiskey: "Whisky",
-}
-
-function CategoryGlyph({ id }: { id: string }) {
-  const props = { className: styles.glyph, strokeWidth: 2 } as const
-  const key = id.toLowerCase()
-  if (key === "all") return <LayoutGrid {...props} />
-  if (key.includes("cider")) return <Wine {...props} />
-  if (key.includes("beer")) return <Beer {...props} />
-  if (key.includes("tequila") || key.includes("mezcal")) return <Martini {...props} />
-  if (key.includes("whisky") || key.includes("whiskey") || key.includes("spirit"))
-    return <GlassWater {...props} />
-  if (key.includes("cocktail") || key.includes("mix")) return <Martini {...props} />
-  if (key.includes("soft") || key.includes("juice")) return <Leaf {...props} />
-  if (key.includes("energy")) return <Zap {...props} />
-  if (key.includes("soda") || key.includes("water")) return <CupSoda {...props} />
-  return <Wine {...props} />
+  cocktails: "Cocktails",
+  whiskey: "Whiskey",
+  whisky: "Whiskey",
 }
 
 export const CategoryTabs = memo(function CategoryTabs({
@@ -75,8 +51,8 @@ export const CategoryTabs = memo(function CategoryTabs({
   return (
     <div className={styles.wrap}>
       <div className={styles.track}>
-        <div className={styles.fadeLeft} />
-        <div className={styles.fadeRight} />
+        <div className={styles.fadeLeft} aria-hidden />
+        <div className={styles.fadeRight} aria-hidden />
 
         <div ref={scrollRef} className={styles.scroll}>
           {hasJaba && (
@@ -84,10 +60,12 @@ export const CategoryTabs = memo(function CategoryTabs({
               <button
                 type="button"
                 onClick={onJabaClick}
-                className={styles.jaba}
+                className={styles.pill}
               >
-                <Leaf className={styles.glyph} />
-                Jaba
+                <span className={styles.iconWrap}>
+                  <IconJaba className={styles.icon} />
+                </span>
+                <span className={styles.label}>Jaba</span>
               </button>
               <span className={styles.divider} aria-hidden />
             </>
@@ -97,6 +75,7 @@ export const CategoryTabs = memo(function CategoryTabs({
             const isActive = selectedCategory === cat.id
             const label = shortLabelMap[cat.id] ?? cat.name
             const count = cat.id === "all" ? totalCount : (counts[cat.id] ?? 0)
+            const Icon = categoryIconFor(cat.id)
 
             return (
               <button
@@ -104,13 +83,13 @@ export const CategoryTabs = memo(function CategoryTabs({
                 ref={isActive ? activeRef : undefined}
                 type="button"
                 onClick={() => onCategoryChange(cat.id)}
-                className={cn(
-                  styles.pill,
-                  isActive ? styles.pillActive : styles.pillIdle
-                )}
+                className={cn(styles.pill, isActive && styles.pillActive)}
+                aria-pressed={isActive}
               >
-                {!isActive && <CategoryGlyph id={cat.id} />}
-                <span>
+                <span className={styles.iconWrap}>
+                  <Icon className={styles.icon} />
+                </span>
+                <span className={styles.label}>
                   {isActive && count > 0 ? `${label} · ${count}` : label}
                 </span>
               </button>
