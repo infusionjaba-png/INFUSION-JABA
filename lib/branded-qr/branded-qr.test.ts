@@ -49,7 +49,7 @@ describe("branded QR matrix", () => {
     expect(result.svg).toContain("qr-modules")
     expect(result.svg).toContain("logo-badge")
     expect(result.svg).toContain("leaf-flourish")
-    expect(result.svg).toContain("M0 78C28 20 92 -5 158 0")
+    expect(result.svg).toContain("M0 78C26 18 90 -8 160 2")
     expect(result.svg).toContain("circular-frame")
     expect(result.svg).toContain("orange-dots")
     expect(result.svg).toMatch(/rx="[0-9.]+"/)
@@ -57,7 +57,7 @@ describe("branded QR matrix", () => {
     const leafChunk =
       result.svg.match(/id="leaf-flourish"[\s\S]*?<\/g>/)?.[0] ?? ""
     expect(leafChunk).toBeTruthy()
-    expect(leafChunk).toContain("M0 78C28 20 92 -5 158 0")
+    expect(leafChunk).toContain("M0 78C26 18 90 -8 160 2")
     expect(leafChunk).toContain('stroke="#FFFFFF"')
     expect(leafChunk).not.toContain("<circle")
 

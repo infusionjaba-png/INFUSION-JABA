@@ -22,10 +22,10 @@ export const CANVAS_SIZE = 600
 export const QR_SIZE = 330
 export const QR_X = 135
 export const QR_Y = 125
-export const FRAME_STROKE = 12
-export const FRAME_STROKE_NARROW = 6.5
-/** Ring radius ≈ 39% of canvas → diameter ~78%. */
-export const FRAME_RADIUS = 236
+export const FRAME_STROKE = 14
+export const FRAME_STROKE_NARROW = 8
+/** Ring radius ≈ 40.5% of canvas → diameter ~81% (matches reference). */
+export const FRAME_RADIUS = 243
 /** Centered on the QR matrix (QR sits slightly above canvas mid). */
 export const FRAME_CX = 300
 export const FRAME_CY = 290

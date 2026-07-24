@@ -113,7 +113,7 @@ export function drawQrModules(
       if (isInFinderPattern(r, c, n)) continue
       const x = matrixOriginX + c * modulePx
       const y = matrixOriginY + r * modulePx
-      const inset = modulePx * 0.015
+      const inset = modulePx * 0.005
       parts.push(
         `<rect x="${(x + inset).toFixed(2)}" y="${(y + inset).toFixed(2)}" width="${(modulePx - inset * 2).toFixed(2)}" height="${(modulePx - inset * 2).toFixed(2)}" rx="${roundR.toFixed(2)}" ry="${roundR.toFixed(2)}" fill="${green}"/>`
       )
@@ -126,6 +126,7 @@ export function drawQrModules(
 /**
  * Broken circular frame — separate arcs with intentional openings
  * (lower-left for orange dots, lower-right for leaf, gap near top-right).
+ * Angles: 0° = top, clockwise (matched to reference emblem).
  */
 export function drawCircularFrame(
   cx: number,
@@ -134,11 +135,11 @@ export function drawCircularFrame(
   green: string
 ): string {
   // Heavy arc: after orange-dot gap → left side → near top-center
-  const mainLeft = arcPath(cx, cy, radius, 236, 352)
-  // Bottom arc: leaf base → bottom → just before orange dots
-  const bottom = arcPath(cx, cy, radius, 145, 190)
+  const mainLeft = arcPath(cx, cy, radius, 250, 355)
+  // Bottom arc: leaf attach (~4 o'clock) → bottom → just before orange-dot gap
+  const bottom = arcPath(cx, cy, radius, 128, 228)
   // Narrow right-side arc (thinner stroke), above leaf toward upper-right
-  const right = arcPath(cx, cy, radius, 52, 105)
+  const right = arcPath(cx, cy, radius, 68, 112)
 
   return [
     `<g id="circular-frame" fill="none" stroke="${green}" stroke-linecap="round" stroke-linejoin="round">`,
@@ -150,13 +151,14 @@ export function drawCircularFrame(
 }
 
 export function drawOrangeDots(cx: number, cy: number, radius: number, orange: string): string {
-  // Slightly outside the frame stroke so they sit in the lower-left gap
-  // without entering the quiet-zone square. Largest → smallest along the curve.
-  const dotRadius = radius + 20
+  // Sit just outside the frame stroke in the lower-left gap (between bottom & left arcs).
+  // Largest → smallest diagonally downward toward the right, matching the reference.
+  // Keep all dots outside the QR quiet-zone square.
+  const dotRadius = radius + 8
   const specs = [
-    { deg: 214, r: 7 },
-    { deg: 206, r: 6 },
-    { deg: 198, r: 5 },
+    { deg: 246, r: 7 },
+    { deg: 241, r: 6 },
+    { deg: 236, r: 5 },
   ]
   return specs
     .map(({ deg, r }) => {
@@ -168,12 +170,13 @@ export function drawOrangeDots(cx: number, cy: number, radius: number, orange: s
 
 /**
  * Broad pointed leaf attached to lower-right frame (not a circle/ellipse).
+ * Target ~25–28% canvas width and ~13–17% height (reference proportions).
  */
 export function drawLeaf(green: string): string {
   return [
-    `<g id="leaf-flourish" transform="translate(390 435) rotate(-25)" aria-hidden="true">`,
-    `<path d="M0 78C28 20 92 -5 158 0C143 54 99 91 42 96C23 97 9 90 0 78Z" fill="${green}"/>`,
-    `<path d="M24 79C61 58 99 34 139 11" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>`,
+    `<g id="leaf-flourish" transform="translate(405 468) rotate(-38) scale(1.08 0.88)" aria-hidden="true">`,
+    `<path d="M0 78C26 18 90 -8 160 2C146 52 102 88 44 94C24 95 8 88 0 78Z" fill="${green}"/>`,
+    `<path d="M22 76C58 56 98 32 142 10" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>`,
     `</g>`,
   ].join("")
 }
@@ -187,8 +190,8 @@ export function drawCenterLogoBadge(
   bg: string
 ): string {
   const badgeR = badgeDiameter / 2
-  // Logo occupies ~75% of badge diameter
-  const logoSize = badgeDiameter * 0.75
+  // Logo occupies ~75% of badge diameter (spec: 72–78%)
+  const logoSize = badgeDiameter * 0.76
   return [
     `<g id="logo-badge">`,
     `<circle cx="${badgeCx.toFixed(2)}" cy="${badgeCy.toFixed(2)}" r="${badgeR.toFixed(2)}" fill="${bg}" stroke="${green}" stroke-width="3"/>`,
