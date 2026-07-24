@@ -42,6 +42,7 @@ interface Order {
   amountReceived?: number | null
   paymentReceiptSmsStatus?: string | null
   servedAt?: string | Date | null
+  table?: string | number | null
 }
 
 interface OrderCardMobileProps<T = any> {
@@ -115,6 +116,10 @@ export function OrderCardMobile<T = any>({
   const hasMoreItems = safeItems.length > 2
   const isServedWaitingPayment =
     Boolean(order.servedAt) && (status === "NOT_PAID" || status === "PARTIALLY_PAID")
+  const tableLabel =
+    order.table != null && String(order.table).trim() && String(order.table).trim() !== "—"
+      ? String(order.table).replace(/^table\s*/i, "").trim()
+      : null
 
   const handleDelete = () => {
     setMoreOpen(false)
@@ -130,9 +135,16 @@ export function OrderCardMobile<T = any>({
     <>
       <div className="bg-white rounded-xl border border-[#e5e7eb] shadow-sm overflow-hidden">
         {/* Row 1: Order ID + time */}
-        <div className="flex items-center justify-between px-4 pt-3 pb-1">
-          <span className="font-mono text-sm font-semibold text-[#0f172a]">#{order.id}</span>
-          <span className="text-xs text-[#64748b]">{formatTime(order.timestamp)}</span>
+        <div className="flex items-center justify-between px-4 pt-3 pb-1 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {tableLabel && (
+              <span className="inline-flex items-center rounded-md bg-[#0f172a] text-white text-xs font-bold px-2 py-0.5 shrink-0">
+                T{tableLabel}
+              </span>
+            )}
+            <span className="font-mono text-sm font-semibold text-[#0f172a] truncate">#{order.id}</span>
+          </div>
+          <span className="text-xs text-[#64748b] shrink-0">{formatTime(order.timestamp)}</span>
         </div>
         {/* Row 2: Customer + status + source */}
         <div className="flex items-center justify-between gap-2 px-4 pb-2">

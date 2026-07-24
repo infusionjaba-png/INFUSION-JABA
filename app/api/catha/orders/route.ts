@@ -168,46 +168,79 @@ export async function GET(request: Request) {
         buildOrdersListMongoFilter({ q, paymentMethod, paymentStatus, lifecycle })
       )
       const coll = db.collection('orders')
-      // Unaccepted /menu rounds (Accept banner) float to the top of every page.
+      // Menu rounds needing Accept (2) or Served (1) float above everything else.
       const listPipeline = [
         { $match: filter },
         {
           $addFields: {
-            _needsAccept: {
-              $cond: [
+            _isMenu: {
+              $or: [
+                { $eq: ['$orderSource', 'menu'] },
                 {
                   $and: [
-                    { $ne: ['$status', 'completed'] },
-                    { $ne: ['$status', 'cancelled'] },
-                    {
-                      $or: [
-                        { $eq: ['$orderSource', 'menu'] },
-                        {
-                          $and: [
-                            { $eq: ['$cashier', 'Customer'] },
-                            { $ne: [{ $ifNull: ['$customerPhone', null] }, null] },
-                          ],
-                        },
-                      ],
-                    },
-                    {
-                      $or: [
-                        { $eq: [{ $ifNull: ['$waiter', ''] }, ''] },
-                        { $eq: ['$waiter', 'Customer'] },
-                      ],
-                    },
+                    { $eq: ['$cashier', 'Customer'] },
+                    { $ne: [{ $ifNull: ['$customerPhone', null] }, null] },
                   ],
                 },
-                1,
-                0,
+              ],
+            },
+            _open: {
+              $and: [
+                { $ne: ['$status', 'completed'] },
+                { $ne: ['$status', 'cancelled'] },
+                { $not: { $in: [{ $toUpper: { $ifNull: ['$paymentStatus', ''] } }, ['PAID', 'COMPLETED', 'OVERPAID']] } },
+              ],
+            },
+            _waiterBlank: {
+              $or: [
+                { $eq: [{ $ifNull: ['$waiter', ''] }, ''] },
+                { $eq: ['$waiter', 'Customer'] },
+              ],
+            },
+            _notServed: {
+              $or: [
+                { $eq: [{ $ifNull: ['$servedAt', null] }, null] },
+                { $eq: ['$servedAt', ''] },
               ],
             },
           },
         },
-        { $sort: { _needsAccept: -1, timestamp: -1 } },
+        {
+          $addFields: {
+            _menuAttention: {
+              $cond: [
+                { $and: ['$_isMenu', '$_open', '$_waiterBlank'] },
+                2,
+                {
+                  $cond: [
+                    {
+                      $and: [
+                        '$_isMenu',
+                        '$_open',
+                        { $not: '$_waiterBlank' },
+                        '$_notServed',
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        { $sort: { _menuAttention: -1, timestamp: -1 } },
         { $skip: skip },
         { $limit: limit },
-        { $project: { _needsAccept: 0 } },
+        {
+          $project: {
+            _isMenu: 0,
+            _open: 0,
+            _waiterBlank: 0,
+            _notServed: 0,
+            _menuAttention: 0,
+          },
+        },
       ]
       const [total, rawList] = await Promise.all([
         coll.countDocuments(filter),

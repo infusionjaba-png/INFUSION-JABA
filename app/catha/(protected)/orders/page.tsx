@@ -40,28 +40,65 @@ import { Textarea } from "@/components/ui/textarea"
 
 const ORDERS_PAGE_SIZE = 72
 
-/** Unaccepted /menu rounds (Accept banner) stay pinned above the rest. */
-function isUnacceptedMenuOrder(tx: Transaction): boolean {
-  const source =
+function menuOrderSource(tx: Transaction): "menu" | "pos" | string {
+  return (
     (tx as any).orderSource ||
     ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+  )
+}
+
+function isMenuUnpaid(tx: Transaction): boolean {
+  if (tx.status === "completed" || tx.status === "cancelled") return false
+  const pay = String((tx as any).paymentStatus || tx.status || "").toUpperCase()
+  return pay !== "PAID" && pay !== "COMPLETED" && pay !== "OVERPAID"
+}
+
+/** Needs Accept — highest pin priority. */
+function isUnacceptedMenuOrder(tx: Transaction): boolean {
   const waiter = (tx as any).waiter as string | undefined
   return (
-    tx.status === "pending" &&
-    source === "menu" &&
+    isMenuUnpaid(tx) &&
+    menuOrderSource(tx) === "menu" &&
     (!waiter || waiter === "Customer")
   )
 }
 
+/** Accepted, waiting for Served click — stay pinned until served. */
+function isAwaitingServeMenuOrder(tx: Transaction): boolean {
+  const waiter = (tx as any).waiter as string | undefined
+  const servedAt = (tx as any).servedAt
+  return (
+    isMenuUnpaid(tx) &&
+    menuOrderSource(tx) === "menu" &&
+    !!waiter &&
+    waiter !== "Customer" &&
+    !servedAt
+  )
+}
+
+/** 2 = needs Accept, 1 = needs Served, 0 = normal */
+function menuAttentionRank(tx: Transaction): number {
+  if (isUnacceptedMenuOrder(tx)) return 2
+  if (isAwaitingServeMenuOrder(tx)) return 1
+  return 0
+}
+
 function sortOrdersUnacceptedFirst(list: Transaction[]): Transaction[] {
   return list.slice().sort((a, b) => {
-    const aTop = isUnacceptedMenuOrder(a) ? 1 : 0
-    const bTop = isUnacceptedMenuOrder(b) ? 1 : 0
+    const aTop = menuAttentionRank(a)
+    const bTop = menuAttentionRank(b)
     if (aTop !== bTop) return bTop - aTop
     const at = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp as any).getTime()
     const bt = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp as any).getTime()
     return (Number.isFinite(bt) ? bt : 0) - (Number.isFinite(at) ? at : 0)
   })
+}
+
+function formatTableLabel(table: unknown): string | null {
+  if (table == null || table === "") return null
+  const s = String(table).trim()
+  if (!s || s === "—") return null
+  return s.replace(/^table\s*/i, "")
 }
 
 function linkedMpesaPaymentTitle(p: { linkSource?: string | null }) {
@@ -1644,11 +1681,13 @@ export default function OrdersPage() {
         }),
       })
       setOrders((prev) =>
-        prev.map((o) =>
-          o.id === orderId
-            ? { ...o, waiter: serverName, servedAt, servedBy: serverName }
-            : o
-        )
+        sortOrdersUnacceptedFirst(
+          prev.map((o) =>
+            o.id === orderId
+              ? { ...o, waiter: serverName, servedAt, servedBy: serverName }
+              : o
+          ),
+        ),
       )
       toast.success("Marked served — guest tab updated", { id: "serve-order" })
     } catch {
@@ -1898,6 +1937,7 @@ export default function OrdersPage() {
                 const isMenuSource = orderSource === "menu"
                 const waiterName = (tx as any).waiter as string | undefined
                 const servedAt = (tx as any).servedAt as string | Date | null | undefined
+                const tableLabel = formatTableLabel(tx.table)
                 const orderData = {
                   id: tx.id,
                   timestamp: tx.timestamp,
@@ -1910,6 +1950,7 @@ export default function OrdersPage() {
                   paymentMethod: tx.paymentMethod || null,
                   orderSource,
                   servedAt: servedAt ?? null,
+                  table: tableLabel,
                   amountReceived:
                     (tx as any).totalLinkedPayments ?? (tx as any).cashAmount ?? (tx as any).amountReceived ?? null,
                   balanceDue: (tx as any).balanceDue ?? null,
@@ -1932,17 +1973,21 @@ export default function OrdersPage() {
                 return (
                   <div key={tx.id} className="relative">
                     {isPendingMenuOrder && (
-                      <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-orange-500 to-amber-500 -mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                          <span className="text-white text-xs font-bold uppercase tracking-wide">New Order — Table {tx.table}</span>
-                          {(tx as any).customerPhone && (
-                            <span className="text-white/80 text-xs font-mono">{(tx as any).customerPhone}</span>
-                          )}
+                      <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-t-xl bg-gradient-to-r from-orange-500 to-amber-500 -mb-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="inline-flex items-center justify-center min-w-[2.75rem] h-8 rounded-lg bg-white text-orange-700 text-sm font-black px-2 shrink-0">
+                            {tableLabel ? `T${tableLabel}` : "T—"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-white text-xs font-bold uppercase tracking-wide">New order — Accept</p>
+                            {(tx as any).customerPhone && (
+                              <p className="text-white/80 text-[10px] font-mono truncate">{(tx as any).customerPhone}</p>
+                            )}
+                          </div>
                         </div>
                         <button
                           onClick={() => handleAcceptMenuOrder(tx.id)}
-                          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold px-3 py-1 rounded-full transition-all active:scale-95"
+                          className="flex items-center gap-1.5 bg-white text-orange-700 text-xs font-bold px-3 py-1.5 rounded-full transition-all active:scale-95 shrink-0 shadow-sm"
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Accept
@@ -1950,17 +1995,19 @@ export default function OrdersPage() {
                       </div>
                     )}
                     {canServeMenuOrder && (
-                      <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1">
+                      <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
-                          <span className="text-white text-xs font-bold uppercase tracking-wide truncate">
-                            Preparing — mark when served
+                          <span className="inline-flex items-center justify-center min-w-[2.75rem] h-8 rounded-lg bg-white text-orange-800 text-sm font-black px-2 shrink-0">
+                            {tableLabel ? `T${tableLabel}` : "T—"}
                           </span>
+                          <p className="text-white text-xs font-bold uppercase tracking-wide truncate">
+                            Preparing — tap Served
+                          </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleServeMenuOrder(tx.id)}
-                          className="flex items-center gap-1.5 bg-white text-orange-700 text-xs font-bold px-3 py-1 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
+                          className="flex items-center gap-1.5 bg-white text-orange-700 text-xs font-bold px-3 py-1.5 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
                         >
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Served
@@ -2790,6 +2837,7 @@ export default function OrdersPage() {
                     const isMenuSource = orderSource === "menu"
                     const waiterName = (tx as any).waiter as string | undefined
                     const servedAt = (tx as any).servedAt as string | Date | null | undefined
+                    const tableLabel = formatTableLabel(tx.table)
                     const orderData = {
                       id: tx.id,
                       timestamp: tx.timestamp,
@@ -2808,6 +2856,7 @@ export default function OrdersPage() {
                       paymentMethod: tx.paymentMethod || null,
                       orderSource,
                       servedAt: servedAt ?? null,
+                      table: tableLabel,
                       amountReceived:
                         (tx as any).totalLinkedPayments ??
                         (tx as any).cashAmount ??
@@ -2838,17 +2887,21 @@ export default function OrdersPage() {
                     return (
                       <div key={tx.id} className="relative">
                         {isPendingMenuOrder && (
-                          <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-orange-500 to-amber-500 -mb-1 z-10 relative">
+                          <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-t-xl bg-gradient-to-r from-orange-500 to-amber-500 -mb-1 z-10 relative">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="h-2 w-2 rounded-full bg-white animate-pulse flex-shrink-0" />
-                              <span className="text-white text-xs font-bold">Table {tx.table}</span>
-                              {(tx as any).customerPhone && (
-                                <span className="text-white/80 text-xs font-mono truncate">{(tx as any).customerPhone}</span>
-                              )}
+                              <span className="inline-flex items-center justify-center min-w-[3rem] h-9 rounded-lg bg-white text-orange-700 text-base font-black px-2.5 shrink-0">
+                                {tableLabel ? `T${tableLabel}` : "T—"}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-white text-xs font-bold">New order — Accept</p>
+                                {(tx as any).customerPhone && (
+                                  <p className="text-white/80 text-[10px] font-mono truncate">{(tx as any).customerPhone}</p>
+                                )}
+                              </div>
                             </div>
                             <button
                               onClick={() => handleAcceptMenuOrder(tx.id)}
-                              className="flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-xs font-bold px-2.5 py-1 rounded-full transition-all active:scale-95 flex-shrink-0"
+                              className="flex items-center gap-1 bg-white text-orange-700 text-xs font-bold px-3 py-1.5 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
                             >
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               Accept
@@ -2856,17 +2909,19 @@ export default function OrdersPage() {
                           </div>
                         )}
                         {canServeMenuOrder && (
-                          <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1 z-10 relative">
+                          <div className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-t-xl bg-gradient-to-r from-amber-600 to-orange-500 -mb-1 z-10 relative">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="h-2 w-2 rounded-full bg-white flex-shrink-0" />
-                              <span className="text-white text-xs font-bold truncate">
-                                Preparing — mark when served
+                              <span className="inline-flex items-center justify-center min-w-[3rem] h-9 rounded-lg bg-white text-orange-800 text-base font-black px-2.5 shrink-0">
+                                {tableLabel ? `T${tableLabel}` : "T—"}
                               </span>
+                              <p className="text-white text-xs font-bold truncate">
+                                Preparing — tap Served
+                              </p>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleServeMenuOrder(tx.id)}
-                              className="flex items-center gap-1 bg-white text-orange-700 text-xs font-bold px-2.5 py-1 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
+                              className="flex items-center gap-1 bg-white text-orange-700 text-xs font-bold px-3 py-1.5 rounded-full transition-all active:scale-95 flex-shrink-0 shadow-sm"
                             >
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               Served

@@ -59,6 +59,7 @@ interface Order {
   cashier?: string
   orderSource?: "menu" | "pos" | "online" | null
   servedAt?: string | Date | null
+  table?: string | number | null
 }
 
 interface OrderCardProps<T = any> {
@@ -100,6 +101,10 @@ export function OrderCard<T = any>({
   const remainingItems = (Array.isArray(order.items) ? order.items : []).length - 2
   const isServedWaitingPayment =
     Boolean(order.servedAt) && (status === "NOT_PAID" || status === "PARTIALLY_PAID")
+  const tableLabel =
+    order.table != null && String(order.table).trim() && String(order.table).trim() !== "—"
+      ? String(order.table).replace(/^table\s*/i, "").trim()
+      : null
   
   // Use originalOrder for callbacks if provided, otherwise use order
   const callbackOrder = (originalOrder ?? order) as T
@@ -125,10 +130,10 @@ export function OrderCard<T = any>({
         {/* 1) Header row */}
         <div className="px-3 sm:px-5 pt-3 sm:pt-5 pb-2.5 sm:pb-4 border-b border-[#e5e7eb]">
           <div className="flex items-center justify-between mb-2 sm:mb-3">
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <button
                 onClick={() => onSelect(order.id)}
-                className="p-0.5 rounded hover:bg-gray-100 transition-colors"
+                className="p-0.5 rounded hover:bg-gray-100 transition-colors shrink-0"
               >
                 {isSelected ? (
                   <CheckSquare className="h-4 w-4 text-[#2563eb]" />
@@ -136,9 +141,14 @@ export function OrderCard<T = any>({
                   <Square className="h-4 w-4 text-[#64748b]" />
                 )}
               </button>
-              <span className="font-mono text-xs sm:text-sm font-semibold text-[#0f172a]">#{order.id}</span>
+              {tableLabel && (
+                <span className="inline-flex items-center rounded-lg bg-[#0f172a] text-white text-xs sm:text-sm font-bold px-2.5 py-1 shrink-0 tracking-wide">
+                  T{tableLabel}
+                </span>
+              )}
+              <span className="font-mono text-xs sm:text-sm font-semibold text-[#0f172a] truncate">#{order.id}</span>
             </div>
-            <span className="text-[10px] sm:text-xs text-[#64748b] font-medium">{formatTime(order.timestamp)}</span>
+            <span className="text-[10px] sm:text-xs text-[#64748b] font-medium shrink-0">{formatTime(order.timestamp)}</span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={status} />
