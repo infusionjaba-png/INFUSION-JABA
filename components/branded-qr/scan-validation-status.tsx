@@ -34,6 +34,9 @@ export function ScanValidationStatus({
         <div>
           <p className="font-semibold">QR verified and scannable</p>
           <p className="text-xs text-emerald-700/90 mt-0.5 break-all">Decoded: {validation.decoded}</p>
+          <p className="text-xs text-emerald-700/90 mt-0.5">
+            PNG {validation.pngOk ? "ok" : "fail"} · SVG {validation.svgOk ? "ok" : "fail"}
+          </p>
         </div>
       </div>
     )

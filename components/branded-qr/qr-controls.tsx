@@ -17,6 +17,7 @@ import { Loader2, QrCode, RotateCcw } from "lucide-react"
 export const QR_SIZE_OPTIONS = [
   { label: "Small (320)", value: 320 },
   { label: "Medium (480)", value: 480 },
+  { label: "Standard (600)", value: 600 },
   { label: "Large (640)", value: 640 },
   { label: "Print (1024)", value: 1024 },
 ] as const

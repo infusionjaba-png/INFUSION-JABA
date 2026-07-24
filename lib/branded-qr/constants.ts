@@ -1,8 +1,7 @@
-/** Infusion’s Jaba branded QR palette (matches logo + emblem reference). */
+/** Infusion’s Jaba branded QR palette (exact reference colors). */
 export const BRANDED_QR_COLORS = {
-  primaryGreen: "#2F8F3A",
-  darkGreen: "#237530",
-  orange: "#F27A21",
+  primaryGreen: "#338F3A",
+  orange: "#F1842D",
   background: "#FFFFFF",
   lightBorder: "#E7E7E7",
 } as const
@@ -12,7 +11,23 @@ export const DEFAULT_BRANDED_LOGO_SRC = "/branding/infusions-jaba-logo.png"
 /** Quiet zone in modules (QR spec minimum is 4). */
 export const QUIET_ZONE_MODULES = 4
 
-/** Center logo badge diameter as fraction of matrix width (15–17%, never >18%). */
-export const LOGO_BADGE_FRACTION = 0.165
+/**
+ * Center logo badge diameter as fraction of QR matrix width.
+ * Spec: 18–20%; keep ≤20% for scannability.
+ */
+export const LOGO_BADGE_FRACTION = 0.2
+
+/** Fixed SVG design coordinate system (matches reference composition). */
+export const CANVAS_SIZE = 600
+export const QR_SIZE = 330
+export const QR_X = 135
+export const QR_Y = 125
+export const FRAME_STROKE = 12
+export const FRAME_STROKE_NARROW = 6.5
+/** Ring radius ≈ 39% of canvas → diameter ~78%. */
+export const FRAME_RADIUS = 236
+/** Centered on the QR matrix (QR sits slightly above canvas mid). */
+export const FRAME_CX = 300
+export const FRAME_CY = 290
 
 export const MAX_SAFE_PAYLOAD_CHARS = 800

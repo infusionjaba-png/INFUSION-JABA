@@ -8,7 +8,7 @@ import {
   downloadSvg,
   MAX_SAFE_PAYLOAD_CHARS,
   svgToPngBlob,
-  validateBrandedQrSvg,
+  validateRenderedQr,
   type ScanValidation,
 } from "@/lib/branded-qr"
 import { QrControls } from "./qr-controls"
@@ -40,7 +40,7 @@ export function BrandedQrGenerator({
   className?: string
 }) {
   const [value, setValue] = useState(initialValue)
-  const [size, setSize] = useState(480)
+  const [size, setSize] = useState(600)
   const [svg, setSvg] = useState<string | null>(null)
   const [encodedValue, setEncodedValue] = useState("")
   const [emptyError, setEmptyError] = useState<string | null>(null)
@@ -98,7 +98,7 @@ export function BrandedQrGenerator({
       })
       setSvg(result.svg)
       setEncodedValue(result.encodedValue)
-      const check = await validateBrandedQrSvg(result.svg, result.encodedValue, Math.min(720, Math.max(480, size)))
+      const check = await validateRenderedQr(result.svg, result.encodedValue, Math.min(720, Math.max(480, size)))
       setValidation(check)
       if (check.status === "ok") {
         toast.success("QR verified and scannable")
@@ -119,7 +119,7 @@ export function BrandedQrGenerator({
 
   const handleReset = () => {
     setValue(initialValue)
-    setSize(480)
+    setSize(600)
     setSvg(null)
     setEncodedValue("")
     setEmptyError(null)
@@ -159,7 +159,7 @@ export function BrandedQrGenerator({
 
   return (
     <div className={className}>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)] lg:items-start">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,600px)] lg:items-start">
         <div className="order-2 lg:order-1 space-y-4 rounded-2xl border border-[#E7E7E7] bg-white p-4 sm:p-5 shadow-sm">
           <div>
             <h3 className="text-base font-semibold text-[#0f172a]">Branded QR generator</h3>
@@ -208,7 +208,7 @@ export function BrandedQrGenerator({
         <div className="order-1 lg:order-2 lg:sticky lg:top-4">
           <QrPreview svg={svg} />
           <p className="text-center text-[11px] text-muted-foreground mt-3">
-            Quiet zone preserved · decorations outside matrix · logo ≤ 16% width
+            Quiet zone preserved · decorations outside matrix · logo ≤ 20% width
           </p>
         </div>
       </div>

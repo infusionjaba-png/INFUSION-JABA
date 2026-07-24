@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { buildBrandedQrSvg, generateQrMatrix, QUIET_ZONE_MODULES } from "@/lib/branded-qr"
+import {
+  BRANDED_QR_COLORS,
+  buildBrandedQrSvg,
+  CANVAS_SIZE,
+  FRAME_RADIUS,
+  FRAME_STROKE,
+  generateQrMatrix,
+  QR_SIZE,
+  QR_X,
+  QR_Y,
+  QUIET_ZONE_MODULES,
+} from "@/lib/branded-qr"
 
 describe("branded QR matrix", () => {
   it("encodes the original input value into a real matrix", () => {
@@ -10,34 +21,52 @@ describe("branded QR matrix", () => {
     expect(matrix.get(0, matrix.size - 1)).toBe(true)
   })
 
-  it("builds SVG with quiet zone clearance and leaf path (not a circle)", () => {
+  it("builds SVG matching the reference composition constants", () => {
     const value = "https://www.infusionjaba.co.ke/menu?t=1"
     const result = buildBrandedQrSvg({
       value,
-      size: 480,
+      size: 600,
       logoSrc: "/branding/infusions-jaba-logo.png",
       logoDataUrl: null,
     })
     expect(result.encodedValue).toBe(value)
+    expect(result.matrixPx).toBe(QR_SIZE)
+    expect(result.matrixOriginX).toBe(QR_X)
+    expect(result.matrixOriginY).toBe(QR_Y)
     expect(result.quietZonePx).toBeGreaterThan(0)
     expect(result.modulePx * QUIET_ZONE_MODULES).toBeCloseTo(result.quietZonePx, 5)
+
     // Frame stays outside quiet zone
     const quietHalf = result.quietOuterSize / 2
-    expect(result.ringRadius).toBeGreaterThan(quietHalf + 4)
-    expect(result.svg).toContain("#2F8F3A")
-    expect(result.svg).toContain("#F27A21")
+    expect(result.ringRadius).toBe(FRAME_RADIUS)
+    expect(result.ringRadius - FRAME_STROKE / 2).toBeGreaterThan(quietHalf)
+
+    expect(result.svg).toContain(`viewBox="0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}"`)
+    expect(result.svg).toContain(BRANDED_QR_COLORS.primaryGreen)
+    expect(result.svg).toContain(BRANDED_QR_COLORS.orange)
+    expect(result.svg).toContain("#338F3A")
+    expect(result.svg).toContain("#F1842D")
     expect(result.svg).toContain("qr-modules")
     expect(result.svg).toContain("logo-badge")
     expect(result.svg).toContain("leaf-flourish")
-    expect(result.svg).toContain("M4 48C20 15 58 2 95 5")
+    expect(result.svg).toContain("M0 78C28 20 92 -5 158 0")
     expect(result.svg).toContain("circular-frame")
-    // Modules use rounded rects with ~22% radius, not full circles
+    expect(result.svg).toContain("orange-dots")
     expect(result.svg).toMatch(/rx="[0-9.]+"/)
-    const leafChunk = result.svg.match(/id="leaf-flourish"[\s\S]*?<\/g>\s*<\/g>/)?.[0]
-      ?? result.svg.match(/<g id="leaf-flourish"[\s\S]*?<\/g>/)?.[0]
+
+    const leafChunk =
+      result.svg.match(/id="leaf-flourish"[\s\S]*?<\/g>/)?.[0] ?? ""
     expect(leafChunk).toBeTruthy()
-    expect(leafChunk).toContain("M4 48C20 15 58 2 95 5")
+    expect(leafChunk).toContain("M0 78C28 20 92 -5 158 0")
+    expect(leafChunk).toContain('stroke="#FFFFFF"')
     expect(leafChunk).not.toContain("<circle")
+
+    // Exactly three orange decorative dots
+    const orangeDots = result.svg.match(/id="orange-dots"[\s\S]*?<\/g>/)?.[0] ?? ""
+    expect((orangeDots.match(/<circle/g) ?? []).length).toBe(3)
+
+    // Badge ≤ 20% of QR width
+    expect(result.svg).toMatch(/stroke-width="3"/)
   })
 
   it("rejects empty values", () => {
