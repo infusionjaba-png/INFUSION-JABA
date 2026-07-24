@@ -142,12 +142,16 @@ export function formatCathaOrderForApi(order: Record<string, any>) {
     return {
       ...p,
       transactionDate: transactionDateOut,
-      linkedAt:
-        typeof p.linkedAt === 'string'
-          ? p.linkedAt
-          : p.linkedAt instanceof Date
-            ? p.linkedAt.toISOString()
-            : new Date(p.linkedAt as string).toISOString(),
+      linkedAt: (() => {
+        if (p.linkedAt == null) return null
+        if (typeof p.linkedAt === 'string') return p.linkedAt
+        try {
+          const d = p.linkedAt instanceof Date ? p.linkedAt : new Date(p.linkedAt as string)
+          return Number.isNaN(d.getTime()) ? null : d.toISOString()
+        } catch {
+          return null
+        }
+      })(),
     }
   })
 

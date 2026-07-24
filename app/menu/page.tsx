@@ -29,6 +29,7 @@ import { orderStore } from "@/lib/orderStore"
 import { MenuItem, CartItem, Order, MenuCategory } from "@/types/menu"
 import { useDebounce } from "@/hooks/use-debounce"
 import { useWaiterCallCooldown } from "@/hooks/use-waiter-call-cooldown"
+import { useWaiterCallAck } from "@/hooks/use-waiter-call-ack"
 import { cn } from "@/lib/utils"
 import { normalizeKenyaPhone } from "@/lib/phone-utils"
 import styles from "./menu.module.css"
@@ -102,6 +103,7 @@ function MenuContent() {
 
   const debouncedSearch = useDebounce(searchQuery, 150)
   const waiterCooldown = useWaiterCallCooldown(tableNumber || null)
+  const waiterAck = useWaiterCallAck(tableNumber || null)
 
   const hasJaba = menuItems.some((i) => i.isJaba)
 
@@ -973,7 +975,11 @@ function MenuContent() {
                 }}
                 callWaiterDisabled={waiterCooldown.cooling}
                 callWaiterLabel={
-                  waiterCooldown.cooling ? waiterCooldown.shortLabel : undefined
+                  waiterAck.staffOnWay
+                    ? "Waiter on the way"
+                    : waiterCooldown.cooling
+                      ? waiterCooldown.shortLabel
+                      : undefined
                 }
                 onReorder={handleReorder}
               >

@@ -38,14 +38,57 @@ import {
 import { maybeSendCathaPaymentReceiptSms } from '@/lib/catha-payment-sms'
 import { queueCathaAuditLog } from '@/lib/catha-audit-log'
 
+function toIsoOrNull(value: unknown): string | null {
+  if (value == null || value === false || value === '') return null
+  try {
+    const d = value instanceof Date ? value : new Date(value as any)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  } catch {
+    return null
+  }
+}
+
+function orderDocumentToJsonSafe(order: any) {
+  try {
+    return orderDocumentToJson(order)
+  } catch (err) {
+    console.error('[catha/orders] Failed to serialize order', order?.id || order?._id, err)
+    return {
+      id: String(order?.id || order?._id || 'unknown'),
+      table: order?.table ?? null,
+      orderType: order?.orderType || 'INHOUSE',
+      orderSource: order?.orderSource || null,
+      items: Array.isArray(order?.items) ? order.items : [],
+      subtotal: Number(order?.subtotal) || 0,
+      vat: Number(order?.vat) || 0,
+      total: Number(order?.total) || 0,
+      paymentMethod: order?.paymentMethod || null,
+      linkedPayments: [],
+      totalLinkedPayments: 0,
+      balanceDue: Number(order?.total) || 0,
+      overpaymentAmount: 0,
+      paymentStatus: 'NOT_PAID',
+      cashier: order?.cashier || null,
+      waiter: order?.waiter || null,
+      servedAt: null,
+      servedBy: null,
+      customerName: order?.customerName || null,
+      customerPhone: order?.customerPhone || null,
+      timestamp: new Date(),
+      status: order?.status || 'pending',
+    }
+  }
+}
+
 function orderDocumentToJson(order: any) {
   const pay = formatCathaOrderForApi(order)
+  const ts = toIsoOrNull(order.timestamp) ?? toIsoOrNull(order.createdAt)
   return {
     id: order.id || order._id?.toString(),
     table: order.table,
     orderType: order.orderType || 'INHOUSE',
     orderSource: order.orderSource || null,
-    items: order.items || [],
+    items: Array.isArray(order.items) ? order.items : [],
     subtotal: order.subtotal,
     vat: order.vat,
     total: order.total,
@@ -53,30 +96,32 @@ function orderDocumentToJson(order: any) {
     ...pay,
     mpesaTransactionId: order.mpesaTransactionId || null,
     mpesaReceiptNumber: order.mpesaReceiptNumber || null,
-    linkedAt: order.linkedAt || null,
+    linkedAt: toIsoOrNull(order.linkedAt),
     linkedBy: order.linkedBy || null,
     glovoOrderNumber: order.glovoOrderNumber || null,
     cardTransactionReference: order.cardTransactionReference || null,
     paymentReference: order.paymentReference || null,
     reference: order.reference || null,
     paidAmount: order.paidAmount ?? null,
-    paidAt: order.paidAt || null,
+    paidAt: toIsoOrNull(order.paidAt),
     paidBy: order.paidBy || null,
     cashAmount: order.cashAmount || null,
     cashBalance: order.cashBalance || null,
     changeGiven: order.changeGiven === true,
-    changeGivenAt: order.changeGivenAt || null,
+    changeGivenAt: toIsoOrNull(order.changeGivenAt),
     changeGivenBy: order.changeGivenBy || null,
     changeNotes: order.changeNotes || null,
     cashier: order.cashier,
     waiter: order.waiter,
+    servedAt: toIsoOrNull(order.servedAt),
+    servedBy: order.servedBy || null,
     customerName: order.customerName || null,
     customerPhone: order.customerPhone || null,
     paymentReceiptSmsStatus: order.paymentReceiptSmsStatus || null,
-    paymentReceiptSmsSentAt: order.paymentReceiptSmsSentAt || null,
+    paymentReceiptSmsSentAt: toIsoOrNull(order.paymentReceiptSmsSentAt),
     paymentReceiptSmsPhone: order.paymentReceiptSmsPhone || null,
     paymentReceiptSmsLastError: order.paymentReceiptSmsLastError || null,
-    timestamp: order.timestamp instanceof Date ? order.timestamp : new Date(order.timestamp),
+    timestamp: ts ? new Date(ts) : new Date(),
     status: order.status,
   }
 }
@@ -127,7 +172,7 @@ export async function GET(request: Request) {
         coll.countDocuments(filter),
         coll.find(filter).sort({ timestamp: -1 }).skip(skip).limit(limit).toArray(),
       ])
-      const orders = rawList.map((order: any) => orderDocumentToJson(order))
+      const orders = rawList.map((order: any) => orderDocumentToJsonSafe(order))
       const res = NextResponse.json({ orders, total, limit, skip })
       res.headers.set('Cache-Control', 'no-store')
       return res
@@ -144,7 +189,7 @@ export async function GET(request: Request) {
         )
       }
       
-      return NextResponse.json(orderDocumentToJson(order))
+      return NextResponse.json(orderDocumentToJsonSafe(order))
     }
     
     // Fetch orders: ?limit=200&skip=0 (default 200 newest, supports pagination)
@@ -158,7 +203,7 @@ export async function GET(request: Request) {
       .toArray()
     
     // Convert MongoDB _id and date strings to proper format
-    const formattedOrders = orders.map((order: any) => orderDocumentToJson(order))
+    const formattedOrders = orders.map((order: any) => orderDocumentToJsonSafe(order))
     
     const res = NextResponse.json(formattedOrders)
     // Orders state: short TTL - 3s cache, 5s SWR (near real-time for POS)
@@ -563,7 +608,10 @@ export async function PUT(request: Request) {
     // Never persist client-supplied order clock
     delete updateData.timestamp
     if (Object.prototype.hasOwnProperty.call(updateData, 'mpesaLastPromptAt') && updateData.mpesaLastPromptAt) {
-      updateData.mpesaLastPromptAt = new Date(updateData.mpesaLastPromptAt)
+      updateData.mpesaLastPromptAt = new Date(updateData.mpesaLastPromptAt as any)
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'servedAt') && updateData.servedAt) {
+      updateData.servedAt = new Date(updateData.servedAt as any)
     }
     if (Object.prototype.hasOwnProperty.call(updateData, 'glovoOrderNumber')) {
       const raw = updateData.glovoOrderNumber

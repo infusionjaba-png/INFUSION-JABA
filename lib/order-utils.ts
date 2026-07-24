@@ -1,9 +1,11 @@
 /**
  * Format money amount in Kenyan Shillings
  */
-export function formatMoneyKsh(amount: number | null | undefined): string {
-  if (amount == null) return "—"
-  return `KSh ${amount.toFixed(2)}`
+export function formatMoneyKsh(amount: number | string | null | undefined): string {
+  if (amount == null || amount === "") return "—"
+  const n = typeof amount === "number" ? amount : Number(amount)
+  if (!Number.isFinite(n)) return "—"
+  return `KSh ${n.toFixed(2)}`
 }
 
 /**
@@ -11,7 +13,8 @@ export function formatMoneyKsh(amount: number | null | undefined): string {
  */
 export function formatTime(date: Date | string | null | undefined): string {
   if (!date) return "—"
-  const d = typeof date === "string" ? new Date(date) : date
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return "—"
   return d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
 }
 
@@ -21,8 +24,8 @@ export function formatTime(date: Date | string | null | undefined): string {
 export function getStatusLabel(
   status: string | null | undefined
 ): "PAID" | "PARTIALLY_PAID" | "NOT_PAID" | "OVERPAID" {
-  if (!status) return "NOT_PAID"
-  const s = status.toUpperCase()
+  if (status == null || status === "") return "NOT_PAID"
+  const s = String(status).toUpperCase()
   if (s === "OVERPAID") return "OVERPAID"
   if (s === "PAID" || s === "COMPLETED") return "PAID"
   if (s === "PARTIALLY_PAID" || s === "PARTIAL") return "PARTIALLY_PAID"
@@ -48,4 +51,3 @@ export function getUserInitials(name?: string | null, email?: string | null): st
   }
   return "U"
 }
-

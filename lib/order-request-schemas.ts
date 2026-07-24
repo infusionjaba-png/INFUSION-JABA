@@ -82,6 +82,8 @@ export const cathaStaffOrderUpdateSchema = z
     cashAmount: z.union([z.number(), z.null()]).optional(),
     cashBalance: z.union([z.number(), z.null()]).optional(),
     waiter: z.union([z.string().max(200), z.null()]).optional(),
+    servedAt: z.union([z.string(), z.date(), z.null()]).optional(),
+    servedBy: z.union([z.string().max(200), z.null()]).optional(),
     customerName: z.union([z.string().max(300), z.null()]).optional(),
     customerPhone: z.union([z.string().max(40), z.null()]).optional(),
     promoCode: z.union([z.string().max(64), z.null()]).optional(),

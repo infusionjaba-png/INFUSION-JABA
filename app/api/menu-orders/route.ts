@@ -214,6 +214,28 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 })
     }
     const updated = await db.collection("menu_orders").findOne({ orderId })
+
+    // Mirror sent/active/paid rounds onto admin `orders` (client alertBar often 401s).
+    const syncStatus = String(updated?.status || updateData.status || "").toLowerCase()
+    if (syncStatus === "sent" || syncStatus === "active" || syncStatus === "paid") {
+      try {
+        const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
+        await upsertAdminOrderFromMenuOrder(db, updated, {
+          waiter: updated?.receivedBy || "Customer",
+          ...(syncStatus === "active"
+            ? {
+                servedAt: updated?.servedAt
+                  ? new Date(updated.servedAt as any)
+                  : new Date(),
+                servedBy: updated?.receivedBy || "Server",
+              }
+            : {}),
+        })
+      } catch (syncErr) {
+        console.error("[menu-orders] admin sync failed", syncErr)
+      }
+    }
+
     return NextResponse.json({ success: true, order: updated })
   } catch (error: any) {
     console.error("[menu-orders] PUT error:", error)

@@ -118,3 +118,94 @@ export function tableDisplay(table: string | number | null | undefined): string 
     .trim()
   return n || "—"
 }
+
+/** Pending call waiting for staff "On it" (survives sheet auto-dismiss). */
+const PENDING_CALL_KEY = "menu_waiter_call_pending"
+export const WAITER_CALL_PENDING_EVENT = "menu:waiter-call-pending"
+
+export type PendingWaiterCall = {
+  callId: string
+  tableKey: string
+  reason: WaiterCallReasonId
+  reasonLabel: string
+  confirmedLabel: string
+  createdAt: number
+  /** Set when customer already saw the ack feedback */
+  ackedNotified?: boolean
+}
+
+export function savePendingWaiterCall(pending: PendingWaiterCall) {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.setItem(PENDING_CALL_KEY, JSON.stringify(pending))
+  } catch {}
+  window.dispatchEvent(new CustomEvent(WAITER_CALL_PENDING_EVENT))
+}
+
+export function getPendingWaiterCall(): PendingWaiterCall | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = sessionStorage.getItem(PENDING_CALL_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PendingWaiterCall
+    if (!parsed?.callId) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function clearPendingWaiterCall() {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.removeItem(PENDING_CALL_KEY)
+  } catch {}
+  window.dispatchEvent(new CustomEvent(WAITER_CALL_PENDING_EVENT))
+}
+
+export function markPendingWaiterCallNotified() {
+  const pending = getPendingWaiterCall()
+  if (!pending) return
+  savePendingWaiterCall({ ...pending, ackedNotified: true })
+}
+
+/** Soft confirmation beep when staff taps On it. */
+export function playWaiterAckBeep() {
+  if (typeof window === "undefined") return
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext
+    const ctx = new Ctx()
+    const now = ctx.currentTime
+    const tone = (freq: number, start: number, dur: number, peak: number) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = "sine"
+      osc.frequency.value = freq
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      gain.gain.setValueAtTime(0.0001, start)
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur)
+      osc.start(start)
+      osc.stop(start + dur + 0.02)
+    }
+    // Bright two-note “here” ack — distinct from staff chimes
+    tone(880, now, 0.12, 0.1) // A5
+    tone(1174.66, now + 0.1, 0.18, 0.08) // D6
+    setTimeout(() => ctx.close().catch(() => {}), 600)
+  } catch {}
+}
+
+let lastAckNotifiedCallId: string | null = null
+
+/** Returns true once per callId so sheet + page poller don't double-beep. */
+export function claimWaiterAckNotification(callId: string): boolean {
+  if (!callId || lastAckNotifiedCallId === callId) return false
+  const pending = getPendingWaiterCall()
+  if (pending?.callId === callId && pending.ackedNotified) return false
+  lastAckNotifiedCallId = callId
+  markPendingWaiterCallNotified()
+  return true
+}
+
+

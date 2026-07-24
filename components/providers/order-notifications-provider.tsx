@@ -248,10 +248,11 @@ export function OrderNotificationsProvider({ children }: { children: React.React
   const acceptOrder = useCallback(async (orderId: string) => {
     const serverName = (session?.user as any)?.name ?? "Server"
     try {
+      // Accept = claim only (Preparing). Served is a separate staff action.
       await fetch("/api/catha/menu-orders", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, status: "active", receivedBy: serverName }),
+        body: JSON.stringify({ orderId, receivedBy: serverName }),
       })
       await fetch("/api/catha/orders", {
         method: "PUT",

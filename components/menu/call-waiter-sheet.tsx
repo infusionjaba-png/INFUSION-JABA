@@ -21,11 +21,16 @@ import {
   WAITER_CALL_REASONS,
   WAITER_CALL_SHEET_AUTO_DISMISS_MS,
   type WaiterCallReasonId,
+  claimWaiterAckNotification,
+  clearPendingWaiterCall,
   formatCallTime,
+  playWaiterAckBeep,
   reasonMeta,
+  savePendingWaiterCall,
   startCooldown,
   tableDisplay,
 } from "@/lib/waiter-call"
+import { toast } from "sonner"
 import styles from "./call-waiter-sheet.module.css"
 
 const REASON_ICONS: Record<
@@ -128,7 +133,24 @@ export function CallWaiterSheet({
             clearInterval(pollRef.current)
             pollRef.current = null
           }
+          if (dismissTimer.current) {
+            clearTimeout(dismissTimer.current)
+            dismissTimer.current = null
+          }
+          const meta = reasonMeta(confirmedReason)
+          const label = data.reasonLabel || meta.label
+          if (claimWaiterAckNotification(callId)) {
+            playWaiterAckBeep()
+            toast.success("Waiter confirmed", {
+              description: `${label} · on the way`,
+              duration: 6000,
+            })
+          }
+          dismissTimer.current = setTimeout(() => {
+            onOpenChange(false)
+          }, 2200)
         } else if (data?.status === "cancelled") {
+          clearPendingWaiterCall()
           onOpenChange(false)
         }
       } catch {}
@@ -142,7 +164,7 @@ export function CallWaiterSheet({
         pollRef.current = null
       }
     }
-  }, [phase, callId, open, onOpenChange])
+  }, [phase, callId, open, onOpenChange, confirmedReason, calledAt, tableNumber])
 
   const scheduleAutoDismiss = useCallback(() => {
     if (dismissTimer.current) clearTimeout(dismissTimer.current)
@@ -184,6 +206,14 @@ export function CallWaiterSheet({
       setConfirmedReason(reason)
       setPhase("confirmed")
       startCooldown(tableNumber)
+      savePendingWaiterCall({
+        callId: id,
+        tableKey: tableNumber,
+        reason,
+        reasonLabel: meta.label,
+        confirmedLabel: meta.confirmedLabel,
+        createdAt: typeof data.createdAt === "number" ? data.createdAt : createdAt,
+      })
       onCalled?.({
         callId: id,
         reason,
@@ -199,6 +229,7 @@ export function CallWaiterSheet({
 
   const handleCancelCall = async () => {
     clearTimers()
+    clearPendingWaiterCall()
     if (callId) {
       try {
         await fetch("/api/waiter-calls", {

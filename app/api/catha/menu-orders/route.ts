@@ -270,6 +270,28 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 })
     }
     const updated = await db.collection("menu_orders").findOne({ orderId })
+
+    // Keep /catha/orders in sync for menu rounds (Accept / Served / pay)
+    try {
+      const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
+      const serverName =
+        typeof updateData.receivedBy === "string"
+          ? updateData.receivedBy
+          : (session.user as any)?.name ?? null
+      const isServe = updateData.status === "active"
+      await upsertAdminOrderFromMenuOrder(db, updated, {
+        waiter: serverName || updated?.receivedBy || undefined,
+        ...(isServe
+          ? {
+              servedAt: new Date(),
+              servedBy: serverName || updated?.receivedBy || "Server",
+            }
+          : {}),
+      })
+    } catch (syncErr) {
+      console.error("[menu-orders] admin sync failed", syncErr)
+    }
+
     return NextResponse.json({ success: true, order: updated })
   } catch (error: any) {
     console.error("Error updating menu order:", error)

@@ -421,9 +421,28 @@ export default function OrdersPage() {
     return () => clearInterval(iv)
   }, [mounted, fetchDashboardSummary])
 
-  const mapOrderRow = useCallback((o: any): Transaction => ({
+  const mapOrderRow = useCallback((o: any): Transaction => {
+    const rawItems = Array.isArray(o.items) ? o.items : []
+    const tsRaw = o.timestamp ?? o.createdAt
+    const timestamp =
+      tsRaw instanceof Date
+        ? tsRaw
+        : tsRaw
+          ? new Date(tsRaw)
+          : new Date()
+    const safeTimestamp = Number.isNaN(timestamp.getTime()) ? new Date() : timestamp
+    const numOr = (v: unknown, fallback = 0) => {
+      const n = Number(v)
+      return Number.isFinite(n) ? n : fallback
+    }
+    const numOrNull = (v: unknown) => {
+      if (v == null || v === "") return null
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    }
+    return {
     ...o,
-    timestamp: o.timestamp instanceof Date ? o.timestamp : new Date(o.timestamp),
+    timestamp: safeTimestamp,
     paymentStatus: (() => {
       if (
         o.paymentStatus === "PAID" ||
@@ -432,33 +451,37 @@ export default function OrdersPage() {
       )
         return o.paymentStatus
       if (o.status === "completed") return "PAID"
-      const received = o.cashAmount ?? o.amountReceived ?? 0
-      const total = o.total ?? 0
+      const received = numOr(o.cashAmount ?? o.amountReceived, 0)
+      const total = numOr(o.total, 0)
       if (received > 0 && received < total) return "PARTIALLY_PAID"
       if (o.paymentStatus === "NOT_PAID") return "NOT_PAID"
       return "NOT_PAID"
     })(),
     linkedPayments: Array.isArray(o.linkedPayments) ? o.linkedPayments : [],
-    totalLinkedPayments: o.totalLinkedPayments ?? null,
-    balanceDue: o.balanceDue ?? null,
-    overpaymentAmount: o.overpaymentAmount ?? null,
+    totalLinkedPayments: numOrNull(o.totalLinkedPayments),
+    balanceDue: numOrNull(o.balanceDue),
+    overpaymentAmount: numOrNull(o.overpaymentAmount),
     changeGiven: o.changeGiven === true,
     changeGivenAt: o.changeGivenAt || null,
     changeGivenBy: o.changeGivenBy || null,
     changeNotes: o.changeNotes || null,
     mpesaReceiptNumber: o.mpesaReceiptNumber || null,
     glovoOrderNumber: o.glovoOrderNumber || null,
-    cashAmount: o.cashAmount ?? null,
-    cashBalance: o.cashBalance ?? null,
-    subtotal: o.subtotal ?? 0,
-    vat: o.vat ?? 0,
-    total: o.total ?? 0,
-    items: (o.items || []).map((item: any) => ({
+    cashAmount: numOrNull(o.cashAmount),
+    cashBalance: numOrNull(o.cashBalance),
+    subtotal: numOr(o.subtotal, 0),
+    vat: numOr(o.vat, 0),
+    total: numOr(o.total, 0),
+    servedAt: o.servedAt || null,
+    servedBy: o.servedBy || null,
+    items: rawItems.map((item: any) => ({
       ...item,
-      price: item.price ?? 0,
-      quantity: item.quantity ?? 0,
+      name: item?.name || "Unknown",
+      price: numOr(item?.price, 0),
+      quantity: numOr(item?.quantity, 0),
     })),
-  }), [])
+  }
+  }, [])
 
   const fetchOrders = useCallback(async () => {
     if (isFetchingRef.current) return
@@ -495,11 +518,19 @@ export default function OrdersPage() {
       const total = typeof data.total === "number" ? data.total : rawOrders.length
 
       const processedOrders = rawOrders
-        .map(mapOrderRow)
+        .map((row: any) => {
+          try {
+            return mapOrderRow(row)
+          } catch (err) {
+            console.error("Failed to map order row", row?.id, err)
+            return null
+          }
+        })
+        .filter(Boolean)
         .filter(
           (o: Transaction, idx: number, arr: Transaction[]) =>
             arr.findIndex((x: Transaction) => x.id === o.id) === idx,
-        )
+        ) as Transaction[]
 
       setTotalMatching(total)
       setOrders((prevOrders) => {
@@ -518,7 +549,10 @@ export default function OrdersPage() {
               (prev as any).changeGiven !== (next as any).changeGiven ||
               JSON.stringify((prev as any).linkedPayments || []) !==
                 JSON.stringify((next as any).linkedPayments || []) ||
-              prev.items.length !== next.items.length
+              (Array.isArray(prev.items) ? prev.items.length : 0) !==
+                (Array.isArray(next.items) ? next.items.length : 0) ||
+              (prev as any).servedAt !== (next as any).servedAt ||
+              (prev as any).waiter !== (next as any).waiter
             )
           })
         return hasChanged ? processedOrders : prevOrders
@@ -544,13 +578,28 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!mounted) return
 
-    fetchOrders()
+    let cancelled = false
+    ;(async () => {
+      try {
+        // Pull orphan /menu rounds (created before admin sync) onto this board once per load.
+        await fetch("/api/catha/menu-orders/sync-to-orders", {
+          method: "POST",
+          cache: "no-store",
+        })
+      } catch {
+        /* ignore — list still loads from orders */
+      }
+      if (!cancelled) fetchOrders()
+    })()
 
     const interval = setInterval(() => {
       fetchOrders()
     }, 2000)
 
-    return () => clearInterval(interval)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [mounted, fetchOrders])
 
   useEffect(() => {
@@ -1517,13 +1566,13 @@ export default function OrdersPage() {
   const handleAcceptMenuOrder = async (orderId: string) => {
     const serverName = (session?.user as any)?.name ?? "Server"
     try {
+      // Accept = claim for Preparing. Does not mark Served yet.
       await fetch("/api/catha/menu-orders", {
         method: "PUT",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, status: "active", receivedBy: serverName }),
+        body: JSON.stringify({ orderId, receivedBy: serverName }),
       })
-      // Update bar order so "Server" shows who accepted (not "Customer")
       await fetch("/api/catha/orders", {
         method: "PUT",
         cache: "no-store",
@@ -1535,6 +1584,39 @@ export default function OrdersPage() {
       )
     } catch {
       console.error("Failed to accept order")
+    }
+  }
+
+  const handleServeMenuOrder = async (orderId: string) => {
+    const serverName = (session?.user as any)?.name ?? "Server"
+    try {
+      await fetch("/api/catha/menu-orders", {
+        method: "PUT",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, status: "active", receivedBy: serverName }),
+      })
+      const servedAt = new Date().toISOString()
+      await fetch("/api/catha/orders", {
+        method: "PUT",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: orderId,
+          waiter: serverName,
+          servedAt,
+          servedBy: serverName,
+        }),
+      })
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? { ...o, waiter: serverName, servedAt, servedBy: serverName }
+            : o
+        )
+      )
+    } catch {
+      console.error("Failed to mark order served")
     }
   }
 
@@ -1776,17 +1858,21 @@ export default function OrdersPage() {
             <div className="space-y-3">
               {orders.map((tx) => {
                 const orderSource = (tx as any).orderSource || ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+                const isMenuSource = orderSource === "menu"
+                const waiterName = (tx as any).waiter as string | undefined
+                const servedAt = (tx as any).servedAt as string | Date | null | undefined
                 const orderData = {
                   id: tx.id,
                   timestamp: tx.timestamp,
                   status: tx.status,
                   paymentStatus: getStatusLabel((tx as any).paymentStatus || tx.status),
-                  items: tx.items.map((item) => ({ name: item.name || "Unknown", quantity: item.quantity || 0, price: item.price || 0 })),
+                  items: (Array.isArray(tx.items) ? tx.items : []).map((item) => ({ name: item.name || "Unknown", quantity: item.quantity || 0, price: item.price || 0 })),
                   total: tx.total ?? null,
                   customerName: (tx as any).customerName || undefined,
                   customerPhone: (tx as any).customerPhone || null,
                   paymentMethod: tx.paymentMethod || null,
                   orderSource,
+                  servedAt: servedAt ?? null,
                   amountReceived:
                     (tx as any).totalLinkedPayments ?? (tx as any).cashAmount ?? (tx as any).amountReceived ?? null,
                   balanceDue: (tx as any).balanceDue ?? null,
@@ -1794,7 +1880,16 @@ export default function OrdersPage() {
                   paymentReceiptSmsSentAt: (tx as any).paymentReceiptSmsSentAt ?? null,
                 }
                 // Accept only shows when not yet accepted (waiter still "Customer")
-                const isPendingMenuOrder = tx.status === "pending" && !!(tx as any).customerPhone && ((tx as any).waiter === "Customer" || !(tx as any).waiter)
+                const isPendingMenuOrder =
+                  tx.status === "pending" &&
+                  isMenuSource &&
+                  (!waiterName || waiterName === "Customer")
+                const canServeMenuOrder =
+                  tx.status === "pending" &&
+                  isMenuSource &&
+                  !!waiterName &&
+                  waiterName !== "Customer" &&
+                  !servedAt
                 return (
                   <div key={tx.id} className="relative">
                     {isPendingMenuOrder && (
@@ -1822,6 +1917,7 @@ export default function OrdersPage() {
                       onPrint={handlePrintOrder}
                       onDelete={canDelete ? handleDeleteOrder : undefined}
                       onPay={tx.status !== "completed" ? handlePaymentClick : undefined}
+                      onServe={canServeMenuOrder ? () => handleServeMenuOrder(tx.id) : undefined}
                       onEdit={canEdit && tx.status !== "completed" ? handleEditClick : undefined}
                       onAddItems={canEdit && tx.status === "pending" ? handleAddItemsClick : undefined}
                       onResendMessage={tx.status === "completed" && Boolean((tx as any).customerPhone) ? handleResendReceiptSms : undefined}
@@ -2445,30 +2541,40 @@ export default function OrdersPage() {
                     </TableHeader>
                     <TableBody>
                       {orders.map((tx) => {
-                        const itemCount = tx.items.reduce((sum, i) => sum + i.quantity, 0)
+                        const lineItems = Array.isArray(tx.items) ? tx.items : []
+                        const itemCount = lineItems.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0)
                         const customerName = (tx as any).customerName || null
                         const customerPhone = (tx as any).customerPhone || null
                         const payStatus = getStatusLabel((tx as any).paymentStatus || tx.status)
                         const isPaid = payStatus === "PAID"
                         const isPartiallyPaid = payStatus === "PARTIALLY_PAID"
-                        const cashAmount = (tx as any).cashAmount
-                        const cashBalance = (tx as any).cashBalance
-                        const total = tx.total ?? 0
+                        const cashAmount = Number((tx as any).cashAmount)
+                        const cashBalance = Number((tx as any).cashBalance)
+                        const total = Number(tx.total) || 0
                         const messageDelivery = getMessageDeliveryState(tx as any)
+                        const ts =
+                          tx.timestamp instanceof Date
+                            ? tx.timestamp
+                            : tx.timestamp
+                              ? new Date(tx.timestamp)
+                              : null
+                        const tsOk = ts && !Number.isNaN(ts.getTime())
                         
                         let paymentDetail = ""
-                        if (isPaid && tx.paymentMethod?.toLowerCase() === "cash" && cashAmount != null) {
-                          paymentDetail = `Rec: KSh ${cashAmount?.toFixed(2)}`
-                          if (cashBalance > 0) paymentDetail += ` • Chg: KSh ${cashBalance?.toFixed(2)}`
-                        } else if (isPaid && tx.paymentMethod?.toLowerCase() === "mpesa" && tx.mpesaReceiptNumber) {
+                        if (isPaid && String(tx.paymentMethod || "").toLowerCase() === "cash" && Number.isFinite(cashAmount)) {
+                          paymentDetail = `Rec: KSh ${cashAmount.toFixed(2)}`
+                          if (Number.isFinite(cashBalance) && cashBalance > 0) {
+                            paymentDetail += ` • Chg: KSh ${cashBalance.toFixed(2)}`
+                          }
+                        } else if (isPaid && String(tx.paymentMethod || "").toLowerCase() === "mpesa" && tx.mpesaReceiptNumber) {
                           paymentDetail = `#${tx.mpesaReceiptNumber}`
-                        } else if (isPaid && tx.paymentMethod?.toLowerCase() === "glovo" && (tx as any).glovoOrderNumber) {
+                        } else if (isPaid && String(tx.paymentMethod || "").toLowerCase() === "glovo" && (tx as any).glovoOrderNumber) {
                           paymentDetail = `Glovo #${(tx as any).glovoOrderNumber}`
-                        } else if (isPaid && tx.paymentMethod?.toLowerCase() === "card" && ((tx as any).cardTransactionReference || (tx as any).paymentReference || (tx as any).reference)) {
+                        } else if (isPaid && String(tx.paymentMethod || "").toLowerCase() === "card" && ((tx as any).cardTransactionReference || (tx as any).paymentReference || (tx as any).reference)) {
                           const ref = (tx as any).cardTransactionReference || (tx as any).paymentReference || (tx as any).reference
                           paymentDetail = `Card #${String(ref)}`
-                        } else if (isPartiallyPaid && cashAmount != null) {
-                          paymentDetail = `Rec: KSh ${cashAmount.toFixed(2)} • Due: KSh ${(total - cashAmount).toFixed(2)}`
+                        } else if (isPartiallyPaid && Number.isFinite(cashAmount)) {
+                          paymentDetail = `Rec: KSh ${cashAmount.toFixed(2)} • Due: KSh ${Math.max(0, total - cashAmount).toFixed(2)}`
                         } else if (payStatus === "NOT_PAID") {
                           paymentDetail = "Not paid"
                         }
@@ -2507,9 +2613,15 @@ export default function OrdersPage() {
                             {/* Time (date + time stacked) */}
                             <TableCell className="px-4 py-3">
                               <div className="flex flex-col gap-0.5">
-                                <span className="text-sm text-slate-700">{tx.timestamp.toLocaleDateString("en-KE", { day: "numeric", month: "short" })}</span>
+                                <span className="text-sm text-slate-700">
+                                  {tsOk
+                                    ? ts!.toLocaleDateString("en-KE", { day: "numeric", month: "short" })
+                                    : "—"}
+                                </span>
                                 <span className="text-xs text-slate-400">
-                                  {tx.timestamp.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}
+                                  {tsOk
+                                    ? ts!.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                                    : "—"}
                                 </span>
                               </div>
                             </TableCell>
@@ -2618,12 +2730,15 @@ export default function OrdersPage() {
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 nest-hub-max:gap-2 nest-hub-max:grid-cols-2">
                   {orders.map((tx) => {
                     const orderSource = (tx as any).orderSource || ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+                    const isMenuSource = orderSource === "menu"
+                    const waiterName = (tx as any).waiter as string | undefined
+                    const servedAt = (tx as any).servedAt as string | Date | null | undefined
                     const orderData = {
                       id: tx.id,
                       timestamp: tx.timestamp,
                       status: tx.status,
                       paymentStatus: getStatusLabel((tx as any).paymentStatus || tx.status),
-                      items: tx.items.map((item) => ({
+                      items: (Array.isArray(tx.items) ? tx.items : []).map((item) => ({
                         name: item.name || "Unknown",
                         quantity: item.quantity || 0,
                         price: item.price || 0,
@@ -2635,6 +2750,7 @@ export default function OrdersPage() {
                       customerPhone: (tx as any).customerPhone || null,
                       paymentMethod: tx.paymentMethod || null,
                       orderSource,
+                      servedAt: servedAt ?? null,
                       amountReceived:
                         (tx as any).totalLinkedPayments ??
                         (tx as any).cashAmount ??
@@ -2650,7 +2766,16 @@ export default function OrdersPage() {
                     }
                     
                     // Accept only shows when not yet accepted (waiter still "Customer")
-                const isPendingMenuOrder = tx.status === "pending" && !!(tx as any).customerPhone && ((tx as any).waiter === "Customer" || !(tx as any).waiter)
+                    const isPendingMenuOrder =
+                      tx.status === "pending" &&
+                      isMenuSource &&
+                      (!waiterName || waiterName === "Customer")
+                    const canServeMenuOrder =
+                      tx.status === "pending" &&
+                      isMenuSource &&
+                      !!waiterName &&
+                      waiterName !== "Customer" &&
+                      !servedAt
                     return (
                       <div key={tx.id} className="relative">
                         {isPendingMenuOrder && (
@@ -2680,6 +2805,7 @@ export default function OrdersPage() {
                           onPrint={handlePrintOrder}
                           onDelete={canDelete ? handleDeleteOrder : undefined}
                           onPay={tx.status !== "completed" ? handlePaymentClick : undefined}
+                          onServe={canServeMenuOrder ? () => handleServeMenuOrder(tx.id) : undefined}
                           onEdit={canEdit && tx.status !== "completed" ? handleEditClick : undefined}
                           onAddItems={canEdit && tx.status === "pending" ? handleAddItemsClick : undefined}
                           onResendMessage={tx.status === "completed" && Boolean((tx as any).customerPhone) ? handleResendReceiptSms : undefined}

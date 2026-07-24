@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Printer, MoreVertical, Wallet2, Eye, Edit2, Plus, Trash2, RefreshCw } from "lucide-react"
+import { Printer, MoreVertical, Wallet2, Eye, Edit2, Plus, Trash2, RefreshCw, CheckCircle2 } from "lucide-react"
 import { formatMoneyKsh, formatTime, getStatusLabel } from "@/lib/order-utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,6 +41,7 @@ interface Order {
   balanceDue?: number | null
   amountReceived?: number | null
   paymentReceiptSmsStatus?: string | null
+  servedAt?: string | Date | null
 }
 
 interface OrderCardMobileProps<T = any> {
@@ -50,6 +51,7 @@ interface OrderCardMobileProps<T = any> {
   onPrint: (order: T) => void
   onDelete?: (order: T) => void
   onPay?: (order: T) => void
+  onServe?: (order: T) => void
   onEdit?: (order: T) => void
   onAddItems?: (order: T) => void
   onResendMessage?: (order: T) => void
@@ -94,6 +96,7 @@ export function OrderCardMobile<T = any>({
   onPrint,
   onDelete,
   onPay,
+  onServe,
   onEdit,
   onAddItems,
   onResendMessage,
@@ -104,11 +107,14 @@ export function OrderCardMobile<T = any>({
   const messageSent = String(order.paymentReceiptSmsStatus || "").toUpperCase() === "SENT"
   const callbackOrder = (originalOrder ?? order) as T
   const customerDisplay = order.customerPhone || order.customerName || "Walk-in"
-  const itemSummary = order.items
+  const safeItems = Array.isArray(order.items) ? order.items : []
+  const itemSummary = safeItems
     .slice(0, 2)
     .map((i) => `${i.quantity}x ${i.name}`)
     .join(" · ")
-  const hasMoreItems = order.items.length > 2
+  const hasMoreItems = safeItems.length > 2
+  const isServedWaitingPayment =
+    Boolean(order.servedAt) && (status === "NOT_PAID" || status === "PARTIALLY_PAID")
 
   const handleDelete = () => {
     setMoreOpen(false)
@@ -141,6 +147,11 @@ export function OrderCardMobile<T = any>({
                 {order.orderSource === "menu" ? "Menu" : order.orderSource === "online" ? "Online" : "POS"}
               </span>
             )}
+            {isServedWaitingPayment && (
+              <span className="inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-orange-100 text-orange-800">
+                Served
+              </span>
+            )}
             <StatusPill status={status} />
           </div>
         </div>
@@ -148,7 +159,7 @@ export function OrderCardMobile<T = any>({
         <div className="px-4 pb-2">
           <p className="text-xs text-[#94a3b8] truncate">
             {itemSummary}
-            {hasMoreItems && ` +${order.items.length - 2} more`}
+            {hasMoreItems && ` +${safeItems.length - 2} more`}
           </p>
         </div>
         {/* Row 4: Total + payment chip */}
@@ -180,10 +191,25 @@ export function OrderCardMobile<T = any>({
 
         {/* Actions row */}
         <div className="flex items-center gap-2 px-4 py-3 bg-[#f8fafc]/50">
+          {onServe && (status === "NOT_PAID" || status === "PARTIALLY_PAID") && !order.servedAt && (
+            <Button
+              size="sm"
+              className="flex-1 h-9 bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm"
+              onClick={() => onServe(callbackOrder)}
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Served
+            </Button>
+          )}
           {(status === "NOT_PAID" || status === "PARTIALLY_PAID") && onPay && (
             <Button
               size="sm"
-              className="flex-1 h-9 bg-primary hover:bg-primary/90 text-white font-semibold text-sm"
+              variant={onServe && !order.servedAt ? "outline" : "default"}
+              className={
+                onServe && !order.servedAt
+                  ? "flex-1 h-9 font-semibold text-sm border-[#e5e7eb]"
+                  : "flex-1 h-9 bg-primary hover:bg-primary/90 text-white font-semibold text-sm"
+              }
               onClick={() => onPay(callbackOrder)}
             >
               <Wallet2 className="h-4 w-4 mr-2" />

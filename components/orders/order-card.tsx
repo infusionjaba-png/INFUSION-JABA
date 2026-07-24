@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { CheckSquare, Square, Eye, Printer, Trash2, Wallet2, Edit2, Plus, MoreVertical, RefreshCw } from "lucide-react"
+import { CheckSquare, Square, Eye, Printer, Trash2, Wallet2, Edit2, Plus, MoreVertical, RefreshCw, CheckCircle2 } from "lucide-react"
 import { StatusBadge } from "./status-badge"
 import { PaymentBadge } from "./payment-badge"
 import { ActionButton } from "./action-button"
@@ -58,6 +58,7 @@ interface Order {
   waiter?: string
   cashier?: string
   orderSource?: "menu" | "pos" | "online" | null
+  servedAt?: string | Date | null
 }
 
 interface OrderCardProps<T = any> {
@@ -69,6 +70,7 @@ interface OrderCardProps<T = any> {
   onPrint: (order: T) => void
   onDelete?: (order: T) => void
   onPay?: (order: T) => void
+  onServe?: (order: T) => void
   onEdit?: (order: T) => void
   onAddItems?: (order: T) => void
   onResendMessage?: (order: T) => void
@@ -83,6 +85,7 @@ export function OrderCard<T = any>({
   onPrint,
   onDelete,
   onPay,
+  onServe,
   onEdit,
   onAddItems,
   onResendMessage,
@@ -93,8 +96,10 @@ export function OrderCard<T = any>({
   const messageSent = messageStatus === "SENT"
   const serverName = order.server?.name || order.waiter || order.cashier || "—"
   const customerDisplay = order.customerPhone || order.customerName || "—"
-  const displayItems = order.items.slice(0, 2)
-  const remainingItems = order.items.length - 2
+  const displayItems = (Array.isArray(order.items) ? order.items : []).slice(0, 2)
+  const remainingItems = (Array.isArray(order.items) ? order.items : []).length - 2
+  const isServedWaitingPayment =
+    Boolean(order.servedAt) && (status === "NOT_PAID" || status === "PARTIALLY_PAID")
   
   // Use originalOrder for callbacks if provided, otherwise use order
   const callbackOrder = (originalOrder ?? order) as T
@@ -137,6 +142,12 @@ export function OrderCard<T = any>({
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={status} />
+            {isServedWaitingPayment && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-100 text-orange-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                Served · waiting payment
+              </span>
+            )}
             {order.orderSource && (
               <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                 order.orderSource === "menu" ? "bg-amber-100 text-amber-800" :
@@ -244,9 +255,19 @@ export function OrderCard<T = any>({
         {/* 5) Actions */}
         <div className="px-3 sm:px-5 py-2.5 sm:py-4 bg-[#f8fafc]">
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {(status === "NOT_PAID" || status === "PARTIALLY_PAID") && onPay && (
+            {onServe && (status === "NOT_PAID" || status === "PARTIALLY_PAID") && !order.servedAt && (
               <ActionButton
                 variant="primary"
+                icon={CheckCircle2}
+                onClick={() => onServe(callbackOrder)}
+                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm !bg-orange-500 hover:!bg-orange-600"
+              >
+                Served
+              </ActionButton>
+            )}
+            {(status === "NOT_PAID" || status === "PARTIALLY_PAID") && onPay && (
+              <ActionButton
+                variant={onServe && !order.servedAt ? "secondary" : "primary"}
                 icon={Wallet2}
                 onClick={() => onPay(callbackOrder)}
                 className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
