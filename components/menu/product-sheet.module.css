@@ -105,6 +105,106 @@
   transform: scale(0.92);
 }
 
+.expand {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 30;
+  height: 30px;
+  width: 30px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f5ebdc;
+  background: rgba(26, 21, 18, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(245, 235, 220, 0.12);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 200ms ease;
+}
+
+.expand:active {
+  transform: scale(0.92);
+}
+
+.expand:hover {
+  background: rgba(26, 21, 18, 0.88);
+}
+
+/* Full-image lightbox — optional, does not change cropped hero */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 40px;
+  background: rgba(10, 8, 6, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: zoom-out;
+}
+
+.lightboxClose {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  z-index: 2;
+  height: 36px;
+  width: 36px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f5ebdc;
+  background: rgba(46, 36, 27, 0.85);
+  border: 1px solid rgba(245, 235, 220, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: transform 200ms ease;
+}
+
+.lightboxClose:active {
+  transform: scale(0.92);
+}
+
+.lightboxFrame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: min(100%, 420px);
+  max-height: 100%;
+  cursor: default;
+}
+
+.lightboxImage {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(78vh, 640px);
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  background: #1a1512;
+}
+
+.lightboxCaption {
+  margin: 0;
+  font-family: var(--menu-font-display), Georgia, serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(245, 235, 220, 0.78);
+  text-align: center;
+}
+
 /* ── Eyebrow strip — 34px at hero bottom edge ──────────────────── */
 
 .eyebrowStrip {

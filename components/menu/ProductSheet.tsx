@@ -1,13 +1,14 @@
 "use client"
 
 import React, { memo, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import {
   Sheet,
   SheetContent,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { Plus, Minus, X, Flame } from "lucide-react"
+import { Plus, Minus, X, Flame, Expand } from "lucide-react"
 import Image from "next/image"
 import { MenuItem } from "@/types/menu"
 import { cn } from "@/lib/utils"
@@ -54,6 +55,7 @@ export const ProductSheet = memo(function ProductSheet({
   const [isDesktop, setIsDesktop] = useState(false)
   const [localQty, setLocalQty] = useState(1)
   const [flash, setFlash] = useState(false)
+  const [imageExpanded, setImageExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const dragControls = useDragControls()
   const dragY = useMotionValue(0)
@@ -71,10 +73,22 @@ export const ProductSheet = memo(function ProductSheet({
     if (open) {
       setLocalQty(Math.max(1, quantity || 1))
       setFlash(false)
+      setImageExpanded(false)
       dragY.set(0)
       if (scrollRef.current) scrollRef.current.scrollTop = 0
+    } else {
+      setImageExpanded(false)
     }
   }, [open, item?.id, quantity, dragY])
+
+  useEffect(() => {
+    if (!imageExpanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setImageExpanded(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [imageExpanded])
 
   if (!item) return null
 
@@ -153,6 +167,20 @@ export const ProductSheet = memo(function ProductSheet({
           >
             <X className="h-3.5 w-3.5" strokeWidth={2.5} />
           </button>
+
+          {item.image && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setImageExpanded(true)
+              }}
+              className={styles.expand}
+              aria-label="View full image"
+            >
+              <Expand className="h-3.5 w-3.5" strokeWidth={2.5} />
+            </button>
+          )}
 
           {eyebrow && (
             <div className={styles.eyebrowStrip}>
@@ -279,6 +307,53 @@ export const ProductSheet = memo(function ProductSheet({
     </motion.div>
   )
 
+  const lightbox =
+    typeof document !== "undefined"
+      ? createPortal(
+          <AnimatePresence>
+            {imageExpanded && item.image && (
+              <motion.div
+                className={styles.lightbox}
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${item.name} — full image`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.22 }}
+                onClick={() => setImageExpanded(false)}
+              >
+                <button
+                  type="button"
+                  className={styles.lightboxClose}
+                  aria-label="Close full image"
+                  onClick={() => setImageExpanded(false)}
+                >
+                  <X className="h-4 w-4" strokeWidth={2.5} />
+                </button>
+                <motion.div
+                  className={styles.lightboxFrame}
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.image}
+                    alt={item.name}
+                    className={styles.lightboxImage}
+                  />
+                  <p className={styles.lightboxCaption}>{item.name}</p>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )
+      : null
+
   return isDesktop ? (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -288,6 +363,7 @@ export const ProductSheet = memo(function ProductSheet({
       >
         {content}
       </DialogContent>
+      {lightbox}
     </Dialog>
   ) : (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -299,6 +375,7 @@ export const ProductSheet = memo(function ProductSheet({
       >
         {content}
       </SheetContent>
+      {lightbox}
     </Sheet>
   )
 })
