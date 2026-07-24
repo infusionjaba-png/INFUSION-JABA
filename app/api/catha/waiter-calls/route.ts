@@ -47,11 +47,14 @@ async function requireStaff() {
   }
   const role = ((session.user as any).role ?? "").toUpperCase()
   const perms = normalizePermissions((session.user as any).permissions)
-  if (
-    role !== "SUPER_ADMIN" &&
-    !hasCathaPermission(perms, "orders", "view") &&
-    !hasCathaPermission(perms, "sales.posSales", "view")
-  ) {
+  // Same audience as New Order toasts + POS: orders or pos view.
+  // (Bugfix: "sales.posSales" is not a Catha module key — hasCathaPermission expects "pos".)
+  const allowed =
+    role === "SUPER_ADMIN" ||
+    role === "ADMIN" ||
+    hasCathaPermission(perms, "orders", "view") ||
+    hasCathaPermission(perms, "pos", "view")
+  if (!allowed) {
     return { ok: false as const, response: NextResponse.json({ error: "Insufficient permissions" }, { status: 403 }) }
   }
   return { ok: true as const, session }

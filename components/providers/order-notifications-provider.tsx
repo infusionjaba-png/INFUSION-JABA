@@ -14,7 +14,7 @@ import type { WaiterCall } from "@/lib/waiter-call"
 
 // ─── Acknowledgement helpers ──────────────────────────────────────────────────
 const ACK_KEY = "catha_notified_orders"
-const WAITER_ACK_KEY = "catha_notified_waiter_calls"
+const WAITER_CHIME_KEY = "catha_chimed_waiter_calls"
 const NOTIFY_WINDOW_MS = 10 * 60 * 1000 // orders sent in last 10 min
 const MAX_VISIBLE = 3
 
@@ -182,7 +182,10 @@ export function OrderNotificationsProvider({ children }: { children: React.React
   const shouldShowNotifications = isAuthenticated && !isMenuPage && !isJabaPage
 
   const ackedRef = useRef<Set<string>>(new Set())
-  const waiterAckedRef = useRef<Set<string>>(new Set())
+  /** Session-only: dismissed without "On it" — don't re-popup every 3s */
+  const waiterDismissedRef = useRef<Set<string>>(new Set())
+  /** Persist chime IDs so refresh doesn't re-ding the same call */
+  const waiterChimedRef = useRef<Set<string>>(new Set())
   const initializedRef = useRef(false)
   const waiterInitializedRef = useRef(false)
   const menuPricesRef = useRef<Record<string, number>>({})
@@ -263,6 +266,7 @@ export function OrderNotificationsProvider({ children }: { children: React.React
   }, [])
 
   const handleDismissWaiterCall = useCallback((callId: string) => {
+    waiterDismissedRef.current.add(callId)
     setWaiterCallPopups((prev) => prev.filter((c) => c.callId !== callId))
   }, [])
 
@@ -348,7 +352,11 @@ export function OrderNotificationsProvider({ children }: { children: React.React
     if (!shouldShowNotifications) return
 
     if (!waiterInitializedRef.current) {
-      waiterAckedRef.current = loadAcked(WAITER_ACK_KEY)
+      waiterChimedRef.current = loadAcked(WAITER_CHIME_KEY)
+      // Migrate / clear old suppress-forever key so pending calls can surface again
+      try {
+        localStorage.removeItem("catha_notified_waiter_calls")
+      } catch {}
       waiterInitializedRef.current = true
     }
 
@@ -357,35 +365,65 @@ export function OrderNotificationsProvider({ children }: { children: React.React
         const res = await fetch("/api/catha/waiter-calls?status=pending", {
           cache: "no-store",
         })
-        if (!res.ok) return
+        if (!res.ok) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn(
+              `[waiter-calls] poll failed: ${res.status}`,
+              await res.text().catch(() => "")
+            )
+          }
+          return
+        }
         const calls: WaiterCall[] = await res.json()
         if (!Array.isArray(calls)) return
 
-        const pendingIds = new Set(
-          calls.map((c) => c.callId || c.id).filter(Boolean)
-        )
-        const fresh: WaiterCall[] = []
-        for (const call of calls) {
+        const pending = calls.filter((c) => {
+          const id = c.callId || c.id
+          if (!id) return false
+          if (c.status !== "pending") return false
+          if (waiterDismissedRef.current.has(id)) return false
+          return true
+        })
+
+        const pendingIds = new Set(pending.map((c) => c.callId || c.id))
+        const toChime: WaiterCall[] = []
+        for (const call of pending) {
           const id = call.callId || call.id
-          if (!id || waiterAckedRef.current.has(id)) continue
-          if (call.status !== "pending") continue
-          waiterAckedRef.current.add(id)
-          fresh.push(call)
+          if (!id || waiterChimedRef.current.has(id)) continue
+          waiterChimedRef.current.add(id)
+          toChime.push(call)
         }
 
-        if (fresh.length > 0) {
-          saveAcked(waiterAckedRef.current, WAITER_ACK_KEY)
+        if (toChime.length > 0) {
+          saveAcked(waiterChimedRef.current, WAITER_CHIME_KEY)
           playWaiterSound()
         }
 
         setWaiterCallPopups((prev) => {
-          const kept = prev.filter((c) => pendingIds.has(c.callId))
-          const existing = new Set(kept.map((c) => c.callId))
-          const toAdd = fresh.filter((c) => !existing.has(c.callId))
-          if (toAdd.length === 0 && kept.length === prev.length) return prev
-          return toAdd.length > 0 ? [...toAdd.reverse(), ...kept] : kept
+          const byId = new Map(prev.map((c) => [c.callId, c]))
+          for (const call of pending) {
+            const id = call.callId || call.id
+            if (!id) continue
+            if (!byId.has(id)) byId.set(id, { ...call, callId: id })
+          }
+          // Drop anything no longer pending on the server
+          for (const id of [...byId.keys()]) {
+            if (!pendingIds.has(id)) byId.delete(id)
+          }
+          const next = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
+          if (
+            next.length === prev.length &&
+            next.every((c, i) => c.callId === prev[i]?.callId)
+          ) {
+            return prev
+          }
+          return next
         })
-      } catch {}
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[waiter-calls] poll error", err)
+        }
+      }
     }
 
     poll()

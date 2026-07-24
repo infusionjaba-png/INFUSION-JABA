@@ -6,15 +6,18 @@ import {
   DrawerContent,
   DrawerTrigger,
 } from "@/components/ui/drawer"
-import { Check, ClipboardList, Receipt, ChevronDown } from "lucide-react"
+import { Bell, Check, ClipboardList, Receipt, ChevronDown } from "lucide-react"
 import { Order } from "@/types/menu"
 import { cn } from "@/lib/utils"
 import styles from "./order-lifecycle.module.css"
 import {
   formatOrderLabel,
   formatOrderTime,
+  formatRoundLabel,
   orderItemCount,
   orderTotal,
+  roundNumberForOrder,
+  tabTotal,
   trackerStep,
   statusPillLabel,
   groupOrdersByDay,
@@ -65,23 +68,15 @@ function StatusTracker({ step }: { step: number }) {
 
 function ActiveOrderCard({
   order,
-  onPayNow,
-  onCallWaiter,
-  callWaiterDisabled,
-  callWaiterLabel,
+  round,
 }: {
   order: Order
-  onPayNow?: (order: Order) => void
-  onCallWaiter?: (order: Order) => void
-  callWaiterDisabled?: boolean
-  callWaiterLabel?: string
+  round: number
 }) {
   const [expanded, setExpanded] = React.useState(false)
   const step = trackerStep(order)
   const count = orderItemCount(order)
   const total = orderTotal(order)
-  const sentAt = order.lastSentAt ?? order.createdAt
-  const cooling = !!callWaiterDisabled
 
   return (
     <div
@@ -98,9 +93,9 @@ function ActiveOrderCard({
     >
       <div className={styles.cardHeader}>
         <div>
-          <p className={styles.orderTitle}>Order {formatOrderLabel(order)}</p>
+          <p className={styles.orderTitle}>{formatRoundLabel(order, round)}</p>
           <p className={styles.meta}>
-            Sent {formatOrderTime(sentAt)} · {count} {count === 1 ? "item" : "items"}
+            {count} {count === 1 ? "item" : "items"}
           </p>
         </div>
         <span className={styles.pill} key={statusPillLabel(order)}>
@@ -125,36 +120,10 @@ function ActiveOrderCard({
         ))}
       </div>
 
-      <div className={styles.footer} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.footer}>
         <span className={styles.total}>
           KES {total.toLocaleString()}
         </span>
-        <div className={styles.actions}>
-          <button
-            type="button"
-            className={cn(
-              styles.ghostBtn,
-              cooling && styles.ghostBtnCalled,
-              cooling && styles.ghostBtnDisabled
-            )}
-            disabled={cooling}
-            onClick={() => {
-              if (cooling) return
-              onCallWaiter?.(order)
-            }}
-          >
-            {callWaiterLabel ?? (cooling ? "Waiter called ✓" : "Call waiter")}
-          </button>
-          {onPayNow && step < 3 && (
-            <button
-              type="button"
-              className={styles.payBtn}
-              onClick={() => onPayNow(order)}
-            >
-              Pay now
-            </button>
-          )}
-        </div>
       </div>
     </div>
   )
@@ -262,8 +231,10 @@ interface ActiveOrdersDrawerProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onSelectOrder?: (order: Order) => void
-  onPayNow?: (order: Order) => void
-  onCallWaiter?: (order: Order) => void
+  /** Settle the whole tab (all unpaid rounds) */
+  onPayTab?: () => void
+  /** Table-level call — not tied to a round */
+  onCallWaiter?: () => void
   callWaiterDisabled?: boolean
   callWaiterLabel?: string
   onReorder?: (order: Order) => void
@@ -275,7 +246,7 @@ export function ActiveOrdersDrawer({
   historyOrders = [],
   open: controlledOpen,
   onOpenChange,
-  onPayNow,
+  onPayTab,
   onCallWaiter,
   callWaiterDisabled,
   callWaiterLabel,
@@ -286,10 +257,19 @@ export function ActiveOrdersDrawer({
   const open = controlledOpen ?? uncontrolledOpen
   const setOpen = onOpenChange ?? setUncontrolledOpen
   const count = orders.length
-  const sorted = React.useMemo(
-    () => [...orders].sort((a, b) => (b.lastSentAt ?? b.createdAt) - (a.lastSentAt ?? a.createdAt)),
-    [orders]
-  )
+  const due = React.useMemo(() => tabTotal(orders), [orders])
+  const cooling = !!callWaiterDisabled
+
+  const rounds = React.useMemo(() => {
+    const newestFirst = [...orders].sort(
+      (a, b) => (b.lastSentAt ?? b.createdAt) - (a.lastSentAt ?? a.createdAt)
+    )
+    return newestFirst.map((order) => ({
+      order,
+      round: roundNumberForOrder(order, orders),
+    }))
+  }, [orders])
+
   const historyGroups = React.useMemo(
     () => groupOrdersByDay(historyOrders),
     [historyOrders]
@@ -318,15 +298,17 @@ export function ActiveOrdersDrawer({
           <div className={styles.handleBar} />
         </div>
 
-        <div className={styles.body}>
+        <div className={cn(styles.body, count > 0 && styles.bodyWithTab)}>
           <section>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionHeaderLeft}>
                 <ClipboardList className={styles.sectionIcon} size={16} strokeWidth={2.25} />
-                <h2 className={styles.sectionLabel}>Active orders</h2>
+                <h2 className={styles.sectionLabel}>Your tab</h2>
               </div>
               <span className={styles.sectionCount}>
-                {count} in progress
+                {count === 0
+                  ? "Nothing open"
+                  : `${count} ${count === 1 ? "round" : "rounds"}`}
               </span>
             </div>
             {count === 0 ? (
@@ -334,24 +316,18 @@ export function ActiveOrdersDrawer({
                 <div className={styles.emptyIcon}>
                   <ClipboardList className="h-7 w-7" />
                 </div>
-                <p className={styles.emptyTitle}>No active orders</p>
+                <p className={styles.emptyTitle}>No open tab</p>
                 <p className={styles.emptySub}>
-                  Orders you&apos;ve sent will appear here until paid
+                  Send drinks to the bar — they&apos;ll land here until you pay once
                 </p>
               </div>
             ) : (
               <div className={styles.stack}>
-                {sorted.map((order) => (
+                {rounds.map(({ order, round }) => (
                   <ActiveOrderCard
                     key={order.orderId}
                     order={order}
-                    onPayNow={(o) => {
-                      onPayNow?.(o)
-                      setOpen(false)
-                    }}
-                    onCallWaiter={onCallWaiter}
-                    callWaiterDisabled={callWaiterDisabled}
-                    callWaiterLabel={callWaiterLabel}
+                    round={round}
                   />
                 ))}
               </div>
@@ -378,7 +354,7 @@ export function ActiveOrdersDrawer({
                 <div>
                   <p className={styles.emptyInlineTitle}>No paid orders yet</p>
                   <p className={styles.emptyInlineSub}>
-                    Completed orders will appear here
+                    Completed tabs will appear here
                   </p>
                 </div>
               </div>
@@ -403,6 +379,47 @@ export function ActiveOrdersDrawer({
             )}
           </section>
         </div>
+
+        {count > 0 && (
+          <div className={styles.tabFooter}>
+            <div className={styles.tabDueRow}>
+              <span className={styles.tabDueLabel}>Total due</span>
+              <span className={styles.tabDueAmount}>
+                KES {due.toLocaleString()}
+              </span>
+            </div>
+            <div className={styles.tabActions}>
+              <button
+                type="button"
+                className={cn(
+                  styles.tabGhostBtn,
+                  cooling && styles.ghostBtnCalled,
+                  cooling && styles.ghostBtnDisabled
+                )}
+                disabled={cooling}
+                onClick={() => {
+                  if (cooling) return
+                  onCallWaiter?.()
+                }}
+              >
+                <Bell className="h-4 w-4" strokeWidth={2.25} />
+                {callWaiterLabel ?? (cooling ? "Waiter called ✓" : "Call waiter")}
+              </button>
+              {onPayTab && (
+                <button
+                  type="button"
+                  className={styles.tabPayBtn}
+                  onClick={() => {
+                    onPayTab()
+                    setOpen(false)
+                  }}
+                >
+                  Pay tab
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </DrawerContent>
     </Drawer>
   )

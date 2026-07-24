@@ -71,7 +71,7 @@ export const StickyCartBar = memo(function StickyCartBar({
               </p>
             </div>
             <div className={styles.cta}>
-              <span>View Order →</span>
+              <span>View cart →</span>
             </div>
           </button>
         </motion.div>

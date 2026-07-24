@@ -127,7 +127,7 @@ export const CartDrawer = memo(function CartDrawer({
                 </div>
                 <div>
                   <span className={styles.title}>
-                    {isAlreadySent ? "Your Order" : isAddingToExisting ? "Add to Order" : "Your Order"}
+                    {isAlreadySent ? "Your tab" : isAddingToExisting ? "Add to tab" : "Your Order"}
                   </span>
                   <p className={styles.subtitle}>
                     {itemCount} {itemCount === 1 ? "item" : "items"}
@@ -301,7 +301,7 @@ export const CartDrawer = memo(function CartDrawer({
                             className={styles.secondaryCta}
                           >
                             <Send className={cn("h-4 w-4", sending && styles.planeFly)} strokeWidth={2.5} />
-                            Send New Items · KES {cartTotal.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            Send to tab · KES {cartTotal.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </button>
                         )}
                       </>
@@ -314,7 +314,7 @@ export const CartDrawer = memo(function CartDrawer({
                     className={styles.primaryCta}
                   >
                     <Send className={cn("h-4 w-4", sending && styles.planeFly)} strokeWidth={2.5} />
-                    {sending ? "Sending…" : "Send Order"}
+                    {sending ? "Sending…" : "Send to tab"}
                   </button>
                 )}
 

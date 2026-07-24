@@ -22,7 +22,7 @@ import { OrderHistoryDrawer } from "@/components/menu/order-history-drawer"
 import { ActiveOrdersDrawer } from "@/components/menu/active-orders-drawer"
 import { CallWaiterSheet } from "@/components/menu/call-waiter-sheet"
 import { CustomerNumberModal } from "@/components/menu/customer-number-modal"
-import { formatOrderLabel } from "@/components/menu/order-display"
+import { formatOrderLabel, tabTotal } from "@/components/menu/order-display"
 import { enrichMenuItem, findServingSiblings } from "@/components/menu/product-meta"
 import { orderStore } from "@/lib/orderStore"
 import { MenuItem, CartItem, Order, MenuCategory } from "@/types/menu"
@@ -79,6 +79,8 @@ function MenuContent() {
   const [activeOrdersOpen, setActiveOrdersOpen] = useState(false)
   const [callWaiterOpen, setCallWaiterOpen] = useState(false)
   const [callWaiterOrderId, setCallWaiterOrderId] = useState<string | null>(null)
+  /** When set, Pay Tab settles every listed unpaid round after M-Pesa success */
+  const [tabCheckoutIds, setTabCheckoutIds] = useState<string[]>([])
   const [orderSentConfirm, setOrderSentConfirm] = useState<{
     orderLabel: string
     tableNumber: string
@@ -530,6 +532,33 @@ function MenuContent() {
     const cust = customerNumber ?? null
     const guest = customerNumber == null ? guestSessionId : null
     const normalizedCustomerPhone = normalizeKenyaPhone(customerNumber ?? "") ?? customerNumber ?? null
+
+    // ── Pay Tab: settle every open round with one payment ──────────
+    if (tabCheckoutIds.length > 0 && method === "mpesa") {
+      const paidAt = Date.now()
+      await Promise.all(
+        tabCheckoutIds.map((orderId) =>
+          orderStore.updateOrder(orderId, {
+            paymentStatus: "PAID" as const,
+            status: "paid" as const,
+            paymentMethod: "mpesa" as const,
+            lastSentAt: paidAt,
+            mpesaReceiptNumber: mpesaReceiptNumber ?? undefined,
+            customerPhone: normalizedCustomerPhone ?? undefined,
+          } as any)
+        )
+      )
+      setTabCheckoutIds([])
+      setPlacedOrderId(tabCheckoutIds[0] ?? null)
+      setActiveOrder(null)
+      setCart([])
+      setShowPaymentModal(false)
+      setCartOpen(false)
+      setShowOrderTracking(false)
+      setActiveOrdersOpen(true)
+      return
+    }
+
     const resolvedActiveOrder = activeOrder ?? orderStore.getActiveUnpaidOrder(tableNumber, cust, guest)
 
     // If activeOrder is already sent/active, the cart is a NEW order — always create fresh
@@ -605,6 +634,7 @@ function MenuContent() {
       if (method === "mpesa") setActiveOrder(null)
     }
 
+    setTabCheckoutIds([])
     setShowPaymentModal(false)
     setCartOpen(false)
     // Paid orders land in history; unpaid/sent stay trackable via Active Orders
@@ -614,7 +644,7 @@ function MenuContent() {
     } else {
       setShowOrderTracking(true)
     }
-  }, [activeOrder, cart, customerNumber, guestSessionId, tableNumber, total])
+  }, [activeOrder, cart, customerNumber, guestSessionId, tableNumber, total, tabCheckoutIds])
 
   const handleItemClick = useCallback((item: MenuItem) => {
     setSelectedItem(item)
@@ -689,6 +719,8 @@ function MenuContent() {
     ),
     [allOrders]
   )
+
+  const tabDue = useMemo(() => tabTotal(activeOrders), [activeOrders])
 
   // History = only fully paid orders
   const historyOrders = useMemo(
@@ -814,7 +846,14 @@ function MenuContent() {
                 setCartOpen(true)
               }}
               onPayNow={() => {
-                setActiveOrder(currentOrder)
+                // Prefer settling the whole tab when multiple rounds are open
+                if (activeOrders.length > 1) {
+                  setTabCheckoutIds(activeOrders.map((o) => o.orderId))
+                  setActiveOrder(null)
+                } else {
+                  setTabCheckoutIds([])
+                  setActiveOrder(currentOrder)
+                }
                 setShowOrderTracking(false)
                 setShowPaymentModal(true)
               }}
@@ -855,18 +894,21 @@ function MenuContent() {
                 historyOrders={historyOrders}
                 open={activeOrdersOpen}
                 onOpenChange={setActiveOrdersOpen}
-                onPayNow={(order) => {
-                  setActiveOrder(order)
+                onPayTab={() => {
+                  setTabCheckoutIds(activeOrders.map((o) => o.orderId))
+                  setActiveOrder(null)
                   setShowPaymentModal(true)
                 }}
-                onCallWaiter={(order) => {
+                onCallWaiter={() => {
                   if (waiterCooldown.cooling) return
-                  setCallWaiterOrderId(order.orderId)
+                  setCallWaiterOrderId(null)
                   setActiveOrdersOpen(false)
                   setCallWaiterOpen(true)
                 }}
                 callWaiterDisabled={waiterCooldown.cooling}
-                callWaiterLabel={waiterCooldown.label}
+                callWaiterLabel={
+                  waiterCooldown.cooling ? waiterCooldown.shortLabel : undefined
+                }
                 onReorder={handleReorder}
               >
                 <button
@@ -1063,23 +1105,36 @@ function MenuContent() {
 
       <PaymentModal
         open={showPaymentModal}
-        onOpenChange={setShowPaymentModal}
-        amount={activeOrder?.total ?? total}
+        onOpenChange={(open) => {
+          setShowPaymentModal(open)
+          if (!open) setTabCheckoutIds([])
+        }}
+        amount={
+          tabCheckoutIds.length > 0
+            ? tabDue
+            : activeOrder?.total ?? total
+        }
         phone={customerNumber ?? ""}
         orderMeta={
-          activeOrder
-            ? `Order ${formatOrderLabel(activeOrder)}${
-                tableNumber ? ` · Table ${tableNumber}` : ""
-              }`
-            : tableNumber
-              ? `Table ${tableNumber}`
-              : undefined
+          tabCheckoutIds.length > 0
+            ? `${tabCheckoutIds.length} ${
+                tabCheckoutIds.length === 1 ? "round" : "rounds"
+              }${tableNumber ? ` · Table ${tableNumber}` : ""}`
+            : activeOrder
+              ? `Order ${formatOrderLabel(activeOrder)}${
+                  tableNumber ? ` · Table ${tableNumber}` : ""
+                }`
+              : tableNumber
+                ? `Table ${tableNumber}`
+                : undefined
         }
         onSuccess={handlePaymentSuccess}
         skipToMpesa={
+          tabCheckoutIds.length > 0 ||
           !!(activeOrder?.status === "sent" || activeOrder?.status === "active")
         }
         mpesaOnly={
+          tabCheckoutIds.length > 0 ||
           !!(activeOrder?.status === "sent" || activeOrder?.status === "active")
         }
       />

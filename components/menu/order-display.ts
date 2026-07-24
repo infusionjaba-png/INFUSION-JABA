@@ -15,6 +15,26 @@ export function formatOrderTime(ts: number): string {
   }).toLowerCase()
 }
 
+/** Chronological round index (oldest unpaid/sent = Round 1). */
+export function roundNumberForOrder(order: Order, allOrders: Order[]): number {
+  const chrono = [...allOrders].sort(
+    (a, b) =>
+      (a.lastSentAt ?? a.createdAt) - (b.lastSentAt ?? b.createdAt)
+  )
+  const idx = chrono.findIndex((o) => o.orderId === order.orderId)
+  return idx >= 0 ? idx + 1 : 1
+}
+
+/** e.g. "Round 1 · 3:16 pm" */
+export function formatRoundLabel(order: Order, round: number): string {
+  const sentAt = order.lastSentAt ?? order.createdAt
+  return `Round ${round} · ${formatOrderTime(sentAt)}`
+}
+
+export function tabTotal(orders: Order[]): number {
+  return orders.reduce((sum, o) => sum + orderTotal(o), 0)
+}
+
 export function orderItemCount(order: Order): number {
   return order.items.reduce((s, i) => s + i.quantity, 0)
 }
