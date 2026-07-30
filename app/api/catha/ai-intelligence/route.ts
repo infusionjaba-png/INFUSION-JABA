@@ -403,6 +403,120 @@ export async function GET() {
       (clientRetentionScore * 0.15)
     )
 
+    const TARGET_SCORE = 70
+    const clampScore = (n: number) => Math.max(0, Math.min(100, n))
+    const salesScore = clampScore(salesHealthScore)
+    const inventoryScore = clampScore(inventoryHealthScore)
+    const dataQualityClamped = clampScore(dataQualityScore)
+    const operationsScore = clampScore(operationsHealthScore)
+    const retentionScore = clampScore(clientRetentionScore)
+    const overallClamped = clampScore(overallHealth)
+    const repeatRatePct = clients.length > 0 ? Math.round((repeatCustomers.length / clients.length) * 100) : 0
+
+    const healthBreakdown = {
+      overall: {
+        score: overallClamped,
+        target: TARGET_SCORE,
+        status: overallClamped >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason:
+          overallClamped >= TARGET_SCORE
+            ? `Weighted blend of sales, inventory, data quality, operations, and retention is ${overallClamped}/100.`
+            : `Overall is ${overallClamped}/100 (target ${TARGET_SCORE}+). Weakest areas pull the combined score down.`,
+        solution:
+          overallClamped >= TARGET_SCORE
+            ? 'Keep the lowest-scoring pillars from slipping; refresh this page after big stock or pricing changes.'
+            : 'Raise any pillar below 70 first—fix inventory pressure, sales consistency, cancel rates, and inactive repeat customers.',
+        actionLink: '#priority-actions',
+        actionLabel: 'See priorities',
+      },
+      sales: {
+        score: salesScore,
+        target: TARGET_SCORE,
+        status: salesScore >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason:
+          completedOrders.length === 0
+            ? 'Almost no completed orders in the analysis window, so sales health stays low.'
+            : `Today KES ${Math.round(todaySales).toLocaleString()} vs yesterday KES ${Math.round(yesterdaySales).toLocaleString()}; ${weekOrders.length} orders this week.`,
+        solution:
+          salesScore >= TARGET_SCORE
+            ? 'Hold daily volume; staff peak hours and keep top sellers in stock.'
+            : todaySales === 0
+              ? 'Drive same-day sales: open POS early, promote bestsellers, and confirm tables/QR ordering is live.'
+              : yesterdaySales > 0 && todaySales < yesterdaySales
+                ? 'Today is behind yesterday—push upsells on peak items and check staff coverage for busy hours.'
+                : weekOrders.length <= 20
+                  ? 'Weekly order count is light—grow traffic via menu QR, promotions on high-margin items, and consistent opening hours.'
+                  : 'Stabilize day-over-day revenue and aim for 50+ completed orders per week.',
+        actionLink: '/catha/orders',
+        actionLabel: 'Open orders',
+      },
+      inventory: {
+        score: inventoryScore,
+        target: TARGET_SCORE,
+        status: inventoryScore >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason: `${outOfStock.length} out of stock, ${lowStock.length} below min, ${deadStock.length} with stock but no 30-day sales (${products.length} products).`,
+        solution:
+          inventoryScore >= TARGET_SCORE
+            ? 'Keep restocking before peak and clear dead stock so capital is not tied up.'
+            : outOfStock.length + lowStock.length > 0
+              ? `Restock ${restockNow.length || lowStock.length} urgent items first, then reduce dead/overstock so score climbs above ${TARGET_SCORE}.`
+              : `Clear or promote ${deadStock.length} non-sellers and tighten reorder quantities on overstock.`,
+        actionLink: '/catha/inventory?filter=restock-urgent',
+        actionLabel: 'Restock urgent',
+      },
+      operations: {
+        score: operationsScore,
+        target: TARGET_SCORE,
+        status: operationsScore >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason: `${cancelRate}% cancel rate, ${editRate}% edits, ${manualAdjustments.length} manual stock adjustments this month.`,
+        solution:
+          operationsScore >= TARGET_SCORE
+            ? 'Keep cancels under 5% and use stock movements instead of frequent manual corrections.'
+            : cancelRate > 5
+              ? 'Review cancelled/voided orders with staff, fix order-entry mistakes, and cut cancel rate below 5%.'
+              : manualAdjustments.length > 20
+                ? 'Reduce manual stock corrections—receive stock properly and train staff on inventory process.'
+                : 'Cut unnecessary order edits and verify pending M-Pesa/SMS issues so operations stay clean.',
+        actionLink: '/catha/orders?filter=cancelled',
+        actionLabel: 'Review cancels',
+      },
+      dataQuality: {
+        score: dataQualityClamped,
+        target: TARGET_SCORE,
+        status: dataQualityClamped >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason: `${missingCost.length} missing cost, ${missingPrice.length} missing price, ${missingCategory.length} weak category, ${missingBarcode.length} missing barcode.`,
+        solution:
+          dataQualityClamped >= TARGET_SCORE
+            ? 'Fill remaining gaps (cost/barcode) so profit and stock reports stay accurate.'
+            : missingCost.length > 0
+              ? `Add buying prices to ${missingCost.length} products first—profit scoring depends on cost data.`
+              : missingPrice.length > 0
+                ? `Set selling prices on ${missingPrice.length} products so POS and menu stay complete.`
+                : 'Assign real categories and barcodes so inventory filters and scanning stay reliable.',
+        actionLink: '/catha/inventory?filter=missing-cost',
+        actionLabel: 'Fix product data',
+      },
+      clientRetention: {
+        score: retentionScore,
+        target: TARGET_SCORE,
+        status: retentionScore >= TARGET_SCORE ? 'on_track' : 'needs_work',
+        reason:
+          clients.length === 0
+            ? 'Few customer phones on orders, so retention cannot be measured well.'
+            : `${repeatRatePct}% repeat rate (${repeatCustomers.length}/${clients.length}); ${inactiveClients.length} previously repeat customers inactive 30+ days.`,
+        solution:
+          retentionScore >= TARGET_SCORE
+            ? 'Protect loyalty: follow up inactive repeats and keep phone capture on every order.'
+            : clients.length === 0
+              ? 'Capture customer phone on more orders so retention tracking becomes meaningful.'
+              : inactiveClients.length > 0
+                ? `Re-engage ${inactiveClients.length} inactive repeats (SMS/offer) and raise repeat visit rate.`
+                : 'Grow first-time to second visit with table QR, loyalty offers, and consistent service.',
+        actionLink: '/catha/clients?segment=inactive-repeat',
+        actionLabel: 'View customers',
+      },
+    }
+
     const risksCount = alerts.filter(a => a.severity === 'critical' || a.severity === 'high').length
     const profitOpportunities = recommendations.filter(r => r.impact === 'profit' || r.impact === 'revenue').length
     const dataIssues = missingCost.length + missingPrice.length + missingCategory.length + missingBarcode.length
@@ -429,13 +543,14 @@ export async function GET() {
       success: true,
       lastUpdated: now.toISOString(),
       healthScore: {
-        overall: Math.max(0, Math.min(100, overallHealth)),
-        sales: Math.max(0, Math.min(100, salesHealthScore)),
-        inventory: Math.max(0, Math.min(100, inventoryHealthScore)),
-        dataQuality: Math.max(0, Math.min(100, dataQualityScore)),
-        operations: Math.max(0, Math.min(100, operationsHealthScore)),
-        clientRetention: Math.max(0, Math.min(100, clientRetentionScore)),
+        overall: overallClamped,
+        sales: salesScore,
+        inventory: inventoryScore,
+        dataQuality: dataQualityClamped,
+        operations: operationsScore,
+        clientRetention: retentionScore,
       },
+      healthBreakdown,
       overview: {
         totalProducts: products.length,
         risksCount,

@@ -16,6 +16,7 @@ interface IntelligenceData {
   success: boolean
   lastUpdated: string
   healthScore: { overall: number; sales: number; inventory: number; dataQuality: number; operations: number; clientRetention: number }
+  healthBreakdown?: import('./_components/ai-hero').HealthBreakdown
   overview: any
   priorityActions: any[]
   alerts: any[]
@@ -134,6 +135,7 @@ export default function AIIntelligenceContent() {
       {/* 1. Hero: health score + key numbers */}
       <AIHero
         healthScore={data.healthScore}
+        healthBreakdown={data.healthBreakdown}
         overview={data.overview}
         lastUpdated={data.lastUpdated}
         onRefresh={fetchData}

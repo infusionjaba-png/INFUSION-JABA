@@ -95,20 +95,73 @@ export function ScoreGauge({ score, label, size = 'md' }: { score: number; label
   )
 }
 
-export function ScoreBar({ score, label }: { score: number; label: string }) {
+export function ScoreBar({
+  score,
+  label,
+  reason,
+  solution,
+  actionLink,
+  actionLabel,
+  target = 70,
+}: {
+  score: number
+  label: string
+  reason?: string
+  solution?: string
+  actionLink?: string
+  actionLabel?: string
+  target?: number
+}) {
   const tone = scoreTone(score)
+  const needsWork = score < target
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[13px] font-medium text-foreground">{label}</span>
-        <span className="flex items-baseline gap-1.5">
-          <span className={cn('text-sm font-bold tabular-nums', tone.text)}>{score}</span>
-          <span className={cn('text-[11px] font-semibold uppercase tracking-wide', tone.text)}>{tone.word}</span>
-        </span>
+    <div className="rounded-xl border border-border/40 bg-muted/20 p-3.5 space-y-2.5">
+      <div>
+        <div className="flex items-center justify-between mb-1.5 gap-2">
+          <span className="text-[13px] font-medium text-foreground">{label}</span>
+          <span className="flex items-baseline gap-1.5 shrink-0">
+            <span className={cn('text-sm font-bold tabular-nums', tone.text)}>{score}</span>
+            <span className={cn('text-[11px] font-semibold uppercase tracking-wide', tone.text)}>{tone.word}</span>
+            {needsWork && (
+              <span className="text-[10px] font-semibold text-muted-foreground tabular-nums">/ {target}+</span>
+            )}
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-muted/50 overflow-hidden relative">
+          <div className={cn('h-full rounded-full transition-all duration-700', tone.bar)} style={{ width: `${score}%` }} />
+          <div
+            className="absolute top-0 bottom-0 w-px bg-foreground/25"
+            style={{ left: `${target}%` }}
+            title={`Target ${target}`}
+          />
+        </div>
       </div>
-      <div className="h-2 rounded-full bg-muted/50 overflow-hidden">
-        <div className={cn('h-full rounded-full transition-all duration-700', tone.bar)} style={{ width: `${score}%` }} />
-      </div>
+      {(reason || solution) && (
+        <div className="space-y-1.5 text-[12px] leading-snug">
+          {reason && (
+            <p className="text-muted-foreground">
+              <span className="font-semibold text-foreground/80">Why: </span>
+              {reason}
+            </p>
+          )}
+          {solution && (
+            <p className={needsWork ? 'text-foreground/90' : 'text-muted-foreground'}>
+              <span className={cn('font-semibold', needsWork ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400')}>
+                {needsWork ? 'Do next: ' : 'Keep: '}
+              </span>
+              {solution}
+            </p>
+          )}
+          {needsWork && actionLink && (
+            <Link
+              href={actionLink}
+              className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline pt-0.5"
+            >
+              {actionLabel || 'Take action'} <ArrowRight className="h-3 w-3" />
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   )
 }
