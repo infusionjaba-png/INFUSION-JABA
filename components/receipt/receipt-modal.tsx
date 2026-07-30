@@ -85,7 +85,7 @@ function buildReceiptHtml(opts: {
   const statusText = isPaid ? "PAID" : order.status === "pending" ? "PENDING" : "NOT PAID"
 
   const payUrl = getOrderPayUrl(order.id, baseUrl)
-  const qrSrc = `${baseUrl.replace(/\/$/, "")}/api/qr?url=${encodeURIComponent(payUrl)}`
+  const qrSrc = `${baseUrl.replace(/\/$/, "")}/api/qr?theme=mono&url=${encodeURIComponent(payUrl)}`
   const showScanToPay = !isPaid && amountDue > 0
 
   // ---------- Items ----------

@@ -27,7 +27,7 @@ export function ScanToPayBlock({
   baseUrl,
 }: ScanToPayBlockProps) {
   const payUrl = getOrderPayUrl(orderId, baseUrl)
-  const qrSrc = `/api/qr?url=${encodeURIComponent(payUrl)}`
+  const qrSrc = `/api/qr?theme=mono&url=${encodeURIComponent(payUrl)}`
   const showPay = !isPaid && amountDue != null && amountDue > 0
 
   if (!showPay && isPaid) {
@@ -109,7 +109,7 @@ export function scanToPayPrintHtml(opts: {
   if (isPaid || amountDue <= 0) return ""
 
   const payUrl = getOrderPayUrl(orderId, baseUrl)
-  const qrSrc = `${(baseUrl || "https://www.infusionjaba.co.ke").replace(/\/$/, "")}/api/qr?url=${encodeURIComponent(payUrl)}`
+  const qrSrc = `${(baseUrl || "https://www.infusionjaba.co.ke").replace(/\/$/, "")}/api/qr?theme=mono&url=${encodeURIComponent(payUrl)}`
 
   return `
     <div style="margin-top:12px;border:2px solid #000;text-align:center;color:#000;background:#fff;">
