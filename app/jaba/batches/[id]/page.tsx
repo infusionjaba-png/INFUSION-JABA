@@ -23,38 +23,46 @@ export default function BatchDetailsPage({ params }: { params: Promise<{ id: str
       try {
         setLoading(true)
         setError(null)
-        
-        // Fetch batch data
+
         const batchResponse = await fetch(`/api/jaba/batches/${id}`)
         if (!batchResponse.ok) {
           throw new Error('Failed to fetch batch')
         }
         const batchData = await batchResponse.json()
         setBatch(batchData.batch)
+        setPackagingOutputs(Array.isArray(batchData.packagingOutputs) ? batchData.packagingOutputs : [])
+        setDeliveryNotes(Array.isArray(batchData.relatedDeliveryNotes) ? batchData.relatedDeliveryNotes : [])
 
-        // Fetch packaging outputs for this batch
-        try {
-          const packagingResponse = await fetch(`/api/jaba/packaging-output?batchId=${id}`)
-          if (packagingResponse.ok) {
-            const packagingData = await packagingResponse.json()
-            setPackagingOutputs(packagingData.packagingOutputs || [])
+        // Fallback only if API didn't include related collections (older deploys)
+        if (!Array.isArray(batchData.packagingOutputs)) {
+          try {
+            const packagingResponse = await fetch(`/api/jaba/packaging-output?batchId=${id}`)
+            if (packagingResponse.ok) {
+              const packagingData = await packagingResponse.json()
+              setPackagingOutputs(packagingData.packagingOutputs || [])
+            }
+          } catch (e) {
+            console.error('Error fetching packaging outputs:', e)
           }
-        } catch (e) {
-          console.error('Error fetching packaging outputs:', e)
         }
 
-        // Fetch delivery notes for this batch (filter by batchNumber in items)
-        try {
-          const deliveryResponse = await fetch('/api/jaba/delivery-notes')
-          if (deliveryResponse.ok) {
-            const deliveryData = await deliveryResponse.json()
-            const relatedDeliveries = deliveryData.deliveryNotes?.filter((dn: any) => 
-              dn.items?.some((item: any) => item.batchNumber === batchData.batch?.batchNumber)
-            ) || []
-            setDeliveryNotes(relatedDeliveries)
+        if (!Array.isArray(batchData.relatedDeliveryNotes) && batchData.batch?.batchNumber) {
+          try {
+            const deliveryResponse = await fetch(
+              `/api/jaba/delivery-notes?batchNumber=${encodeURIComponent(batchData.batch.batchNumber)}`
+            )
+            if (deliveryResponse.ok) {
+              const deliveryData = await deliveryResponse.json()
+              const relatedDeliveries =
+                deliveryData.deliveryNotes?.filter(
+                  (dn: any) =>
+                    dn.items?.some((item: any) => item.batchNumber === batchData.batch?.batchNumber)
+                ) || []
+              setDeliveryNotes(relatedDeliveries)
+            }
+          } catch (e) {
+            console.error('Error fetching delivery notes:', e)
           }
-        } catch (e) {
-          console.error('Error fetching delivery notes:', e)
         }
       } catch (err: any) {
         console.error('Error fetching batch:', err)

@@ -8,8 +8,10 @@ import {
   getInfusedAllocated,
   getNeutralRemainingLitres,
 } from '@/lib/jaba-batch-utils'
-import { JABA_FLAVOUR_LINES_COLLECTION } from '@/lib/jaba-flavour-lines'
-import { loadMergedFlavourRowsForParent } from '@/lib/jaba-flavour-lines-server'
+import {
+  JABA_FLAVOUR_LINES_COLLECTION,
+  mergeFlavourRowsFromCaches,
+} from '@/lib/jaba-flavour-lines'
 import { requireDeleteOtp } from '@/lib/jaba-delete-otp-guard'
 import { purgeJabaBatchGraphByRootId } from '@/lib/jaba-purge-batch-graph'
 import { JABA_PURGE_MONGODB_TRANSACTIONS_REQUIRED_CODE } from '@/lib/jaba-purge-constants'
@@ -410,6 +412,10 @@ export async function GET(
     const db = client.db('infusion_jaba')
     const { ObjectId } = await import('mongodb')
 
+    if (!ObjectId.isValid(id)) {
+      return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+    }
+
     const batch = await db.collection('jaba_batches').findOne({ _id: new ObjectId(id) })
 
     if (!batch) {
@@ -423,27 +429,103 @@ export async function GET(
     const sid = batch._id.toString()
     let flavourOutputs: any[] = []
     let parentBatchSummary: any = null
+    let packagingOutputs: any[] = []
+    let relatedDeliveryNotes: any[] = []
 
     if (!batch.parentBatchId) {
-      const lineMongoIds = await db
-        .collection(JABA_FLAVOUR_LINES_COLLECTION)
-        .find({ parentBatchId: sid })
-        .project({ _id: 1 })
-        .toArray()
-      const legacyKids = await db.collection('jaba_batches').find({ parentBatchId: sid }).toArray()
-      const lineIds = lineMongoIds.map((d) => d._id.toString())
+      const [lines, childBatches] = await Promise.all([
+        db
+          .collection(JABA_FLAVOUR_LINES_COLLECTION)
+          .find({ parentBatchId: sid })
+          .sort({ createdAt: 1 })
+          .toArray(),
+        db
+          .collection('jaba_batches')
+          .find({ parentBatchId: sid })
+          .project({
+            _id: 1,
+            batchNumber: 1,
+            batchType: 1,
+            flavor: 1,
+            flavourName: 1,
+            totalLitres: 1,
+            infusedQuantityLitres: 1,
+            status: 1,
+            createdAt: 1,
+            infusionDate: 1,
+            notes: 1,
+            parentBatchId: 1,
+          })
+          .toArray(),
+      ])
+
+      const lineIds = lines.map((d) => d._id.toString())
+      const childIds = childBatches.map((k) => k._id.toString())
+      const flavouredKids = childBatches.filter(
+        (k) => String((k as any).batchType || '') === 'flavoured' || !!(k as any).parentBatchId
+      )
+      // Prefer explicit flavoured rows for merge (matches prior server helper)
+      const legacyKidsForMerge = childBatches.filter(
+        (k) => String((k as any).batchType || '') === 'flavoured'
+      )
+
       const packOr: Record<string, unknown>[] = [{ batchId: sid }]
-      if (legacyKids.length > 0) {
-        packOr.push({ batchId: { $in: legacyKids.map((k) => k._id.toString()) } })
-      }
+      if (childIds.length > 0) packOr.push({ batchId: { $in: childIds } })
       if (lineIds.length > 0) packOr.push({ flavourLineId: { $in: lineIds } })
-      const packagingOutputs = await db.collection('jaba_packagingOutput').find({ $or: packOr }).toArray()
-      const deliveryNotes = await db.collection('jaba_deliveryNotes').find({}).toArray()
-      flavourOutputs = await loadMergedFlavourRowsForParent(db, sid, packagingOutputs, deliveryNotes)
+
+      const batchNumbers = Array.from(
+        new Set(
+          [String(batch.batchNumber || ''), ...childBatches.map((k) => String((k as any).batchNumber || ''))].filter(
+            Boolean
+          )
+        )
+      )
+
+      const deliveryOr: Record<string, unknown>[] = []
+      if (lineIds.length > 0) deliveryOr.push({ 'items.flavourLineId': { $in: lineIds } })
+      if (batchNumbers.length > 0) deliveryOr.push({ 'items.batchNumber': { $in: batchNumbers } })
+
+      const [packDocs, deliveryDocs] = await Promise.all([
+        db.collection('jaba_packagingOutput').find({ $or: packOr }).toArray(),
+        deliveryOr.length > 0
+          ? db.collection('jaba_deliveryNotes').find({ $or: deliveryOr }).toArray()
+          : Promise.resolve([] as any[]),
+      ])
+
+      packagingOutputs = packDocs
+      relatedDeliveryNotes = deliveryDocs
+
+      flavourOutputs = mergeFlavourRowsFromCaches(
+        sid,
+        lines,
+        legacyKidsForMerge.length > 0 ? legacyKidsForMerge : flavouredKids,
+        packagingOutputs,
+        relatedDeliveryNotes
+      )
     } else {
-      const parent = await db.collection('jaba_batches').findOne({
-        _id: new ObjectId(String(batch.parentBatchId)),
-      })
+      const parentId = String(batch.parentBatchId)
+      const parentPromise = ObjectId.isValid(parentId)
+        ? db.collection('jaba_batches').findOne({ _id: new ObjectId(parentId) })
+        : Promise.resolve(null)
+
+      const [parent, packDocs, deliveryDocs] = await Promise.all([
+        parentPromise,
+        db.collection('jaba_packagingOutput').find({
+          $or: [{ batchId: sid }, { batchId: parentId }],
+        }).toArray(),
+        db.collection('jaba_deliveryNotes').find({
+          $or: [
+            { 'items.batchNumber': String(batch.batchNumber || '') },
+            ...(batch.flavor || batch.flavourName
+              ? [{ 'items.flavor': String(batch.flavor || batch.flavourName) }]
+              : []),
+          ].filter(Boolean),
+        }).toArray(),
+      ])
+
+      packagingOutputs = packDocs
+      relatedDeliveryNotes = deliveryDocs
+
       if (parent) {
         const ps = serializeBatchDoc(parent)
         const p = parent as Record<string, any>
@@ -461,6 +543,27 @@ export async function GET(
     const serialized = serializeBatchDoc(batch)
     const ingredientsDisplay = await enrichIngredientsCosts(db, serialized.ingredients || [])
 
+    const serializePack = (po: any) => ({
+      ...po,
+      _id: po._id?.toString?.() ?? po._id,
+      id: po._id?.toString?.() ?? po.id,
+      packagingDate:
+        po.packagingDate instanceof Date ? po.packagingDate.toISOString() : po.packagingDate,
+      createdAt: po.createdAt instanceof Date ? po.createdAt.toISOString() : po.createdAt,
+    })
+
+    const serializeNote = (note: any) => {
+      const { viewToken: _v, publicShortToken: _p, ...rest } = note
+      return {
+        ...rest,
+        _id: note._id?.toString?.() ?? note._id,
+        id: note._id?.toString?.() ?? note.id,
+        date: note.date instanceof Date ? note.date.toISOString() : note.date,
+        createdAt: note.createdAt instanceof Date ? note.createdAt.toISOString() : note.createdAt,
+        updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt,
+      }
+    }
+
     return NextResponse.json({
       batch: {
         ...serialized,
@@ -473,6 +576,8 @@ export async function GET(
         parentBatch: parentBatchSummary,
         displayFlavorLabel: batch.flavor || NEUTRAL_BATCH_DISPLAY_FLAVOR,
       },
+      packagingOutputs: packagingOutputs.map(serializePack),
+      relatedDeliveryNotes: relatedDeliveryNotes.map(serializeNote),
     })
   } catch (error: any) {
     console.error('[Batches API] ❌ Error fetching batch:', error)

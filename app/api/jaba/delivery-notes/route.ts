@@ -281,6 +281,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const distributorId = searchParams.get('distributorId')
     const status = searchParams.get('status')
+    const batchNumber = searchParams.get('batchNumber')?.trim()
 
     const client = await clientPromise
     const db = client.db('infusion_jaba')
@@ -291,6 +292,9 @@ export async function GET(request: Request) {
     }
     if (status) {
       query.status = status
+    }
+    if (batchNumber) {
+      query['items.batchNumber'] = batchNumber
     }
 
     const deliveryNotes = await db.collection('jaba_deliveryNotes')

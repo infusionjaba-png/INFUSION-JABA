@@ -797,38 +797,17 @@ export async function GET(request: Request) {
 
     const client = await clientPromise
     const db = client.db('infusion_jaba')
-    const { ObjectId } = await import('mongodb')
 
     const query: any = {}
     if (batchId) {
       query.batchId = batchId
     }
 
-    console.log('[Packaging Output API] Query:', JSON.stringify(query))
-    console.log('[Packaging Output API] Database:', db.databaseName)
-    console.log('[Packaging Output API] Collection: jaba_packagingOutput')
-    
-    // Verify collection exists and get count
-    const collection = db.collection('jaba_packagingOutput')
-    const totalCount = await collection.countDocuments({})
-    console.log('[Packaging Output API] Total documents in collection:', totalCount)
-    
-    // Sort by createdAt (most recent first) as primary, then packagingDate as fallback
-    const packagingOutputs = await collection
+    const packagingOutputs = await db
+      .collection('jaba_packagingOutput')
       .find(query)
       .sort({ createdAt: -1, packagingDate: -1 })
       .toArray()
-
-    console.log('[Packaging Output API] Found packaging outputs matching query:', packagingOutputs.length)
-    
-    if (packagingOutputs.length > 0) {
-      console.log('[Packaging Output API] First output sample:', {
-        _id: packagingOutputs[0]._id?.toString(),
-        batchNumber: packagingOutputs[0].batchNumber,
-        packageNumber: packagingOutputs[0].packageNumber,
-        containers: packagingOutputs[0].containers?.length || 0,
-      })
-    }
 
     const formattedOutputs = packagingOutputs.map(output => ({
       ...output,
@@ -838,7 +817,6 @@ export async function GET(request: Request) {
       createdAt: output.createdAt instanceof Date ? output.createdAt.toISOString() : output.createdAt,
     }))
 
-    console.log('[Packaging Output API] Returning', formattedOutputs.length, 'packaging outputs')
     return NextResponse.json({ packagingOutputs: formattedOutputs })
   } catch (error: any) {
     console.error('[Packaging Output API] Error fetching packaging outputs:', error)
