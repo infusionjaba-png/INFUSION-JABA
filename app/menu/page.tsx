@@ -32,6 +32,7 @@ import { useWaiterCallCooldown } from "@/hooks/use-waiter-call-cooldown"
 import { useWaiterCallAck } from "@/hooks/use-waiter-call-ack"
 import { cn } from "@/lib/utils"
 import { normalizeKenyaPhone } from "@/lib/phone-utils"
+import { toast } from "sonner"
 import styles from "./menu.module.css"
 
 function pouringHeadline(): string {
@@ -234,6 +235,26 @@ function MenuContent() {
     }
   }, [tableNumber])
 
+  // Staff edited this round in POS / orders — toast + open My Orders
+  useEffect(() => {
+    const onStaffEdit = (ev: Event) => {
+      const order = (ev as CustomEvent).detail as Order | undefined
+      const notice =
+        order?.staffEditNotice ||
+        "Staff updated your order. Check items and total in My Orders."
+      toast.message("Order updated by staff", {
+        description: notice,
+        duration: 8000,
+      })
+      setActiveOrdersOpen(true)
+      if (order?.orderId) {
+        setActiveOrder(order)
+      }
+    }
+    window.addEventListener("menu-order-staff-edited", onStaffEdit)
+    return () => window.removeEventListener("menu-order-staff-edited", onStaffEdit)
+  }, [])
+
   // Track active unpaid order. Hydrate cart from draft ONCE — never overwrite
   // local cart on every store notify (that caused add/remove flicker).
   useEffect(() => {
@@ -369,6 +390,8 @@ function MenuContent() {
           if (gen !== cartSyncGenRef.current) return
           setActiveOrder(order)
         }
+      } catch (err) {
+        console.error("Cart sync failed:", err)
       } finally {
         if (gen === cartSyncGenRef.current) {
           pendingSyncItemsRef.current = null
@@ -499,6 +522,9 @@ function MenuContent() {
           tableNumber,
         })
       }
+    } catch (err: any) {
+      console.error("Send order failed:", err)
+      toast.error(err?.message || "Could not send order — check stock and try again")
     } finally {
       setSendingOrder(false)
     }

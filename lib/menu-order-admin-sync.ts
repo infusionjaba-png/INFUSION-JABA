@@ -177,6 +177,13 @@ export async function upsertAdminOrderFromMenuOrder(
     waiter,
     orderSource: "menu",
     status: paid ? "completed" : "pending",
+    stockDeducted: menuOrder.stockDeducted === true,
+    stockDeductedAt: menuOrder.stockDeductedAt
+      ? asDate(menuOrder.stockDeductedAt) || new Date()
+      : menuOrder.stockDeducted === true
+        ? new Date()
+        : null,
+    stockReleasedAt: asDate(menuOrder.stockReleasedAt),
     updatedAt: new Date(),
   }
 

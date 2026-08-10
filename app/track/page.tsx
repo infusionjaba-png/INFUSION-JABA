@@ -79,7 +79,7 @@ function TrackOrderPageContent() {
                 id="orderId"
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
-                placeholder="e.g., ORD-2024-001"
+                placeholder="e.g., M482917 or P482917"
                 className="rounded-xl h-12 border-[#10B981]/30 focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/20 bg-white"
                 onKeyDown={(e) => e.key === "Enter" && handleTrack()}
               />

@@ -15,6 +15,7 @@ import { OrderInputField } from "@/components/pos/order-input-field"
 import { InfoChip } from "@/components/pos/info-chip"
 import { CustomerFields } from "@/components/pos/customer-fields"
 import { normalizeKenyaPhone, isValidKenyaPhone, getPhoneValidationError } from "@/lib/phone-utils"
+import { createCathaOrderId } from "@/lib/catha-order-id"
 import { normalizeMpesaStatus } from "@/lib/mpesa-status"
 import { summarizeCathaOrderPayments } from "@/lib/catha-order-payments"
 import { Home, UtensilsCrossed } from "lucide-react"
@@ -1429,7 +1430,7 @@ export default function POSPage() {
     let orderId =
       editingOrderId ?? mpesaSessionOrderId ?? mpesaDraftOrderIdRef.current ?? null
     if (!orderId) {
-      orderId = `TXN${Date.now().toString().slice(-8)}`
+      orderId = createCathaOrderId("pos")
       mpesaDraftOrderIdRef.current = orderId
     }
 
@@ -1594,7 +1595,7 @@ export default function POSPage() {
         setWaiterId("")
         setEditingOrderId(null)
       } else {
-        const transactionId = `TXN${Date.now().toString().slice(-8)}`
+        const transactionId = createCathaOrderId("pos")
         const completedOrder = {
           id: transactionId,
           ...orderData,
@@ -1751,7 +1752,7 @@ export default function POSPage() {
         // Create new order
         if (method === "pay-later") {
           const newOrder: Transaction = {
-            id: `TXN${Date.now().toString().slice(-8)}`,
+            id: createCathaOrderId("pos"),
             ...orderData,
             status: orderData.status as "pending" | "completed" | "cancelled",
             timestamp: new Date(),
@@ -1783,7 +1784,7 @@ export default function POSPage() {
         }
 
         // Regular payment flow — snapshot first, then open receipt, then clear
-        const transactionId = `TXN${Date.now().toString().slice(-8)}`
+        const transactionId = createCathaOrderId("pos")
         const completedOrder: Transaction = {
           id: transactionId,
           ...orderData,

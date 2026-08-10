@@ -7,6 +7,7 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit-simple"
 import { logOrderSecurityEvent } from "@/lib/order-security-audit"
 import { menuOrderCreateSchema, menuOrderPutSchema, formatZodError } from "@/lib/order-request-schemas"
 import { maybeSendOnlineOrderSms } from "@/lib/catha-online-order-sms"
+import { applyMenuOrderStockChange } from "@/lib/menu-order-stock"
 
 export async function GET() {
   const session = await auth()
@@ -62,6 +63,12 @@ export async function GET() {
       servedBy: order.servedBy ?? null,
       cancelledReason: order.cancelledReason,
       mpesaReceiptNumber: order.mpesaReceiptNumber ?? null,
+      staffEditedAt: order.staffEditedAt
+        ? order.staffEditedAt instanceof Date
+          ? order.staffEditedAt.getTime()
+          : new Date(order.staffEditedAt).getTime()
+        : null,
+      staffEditNotice: order.staffEditNotice ?? null,
     }))
 
     return NextResponse.json(formattedOrders)
@@ -137,6 +144,8 @@ export async function POST(request: Request) {
       receivedBy: body.receivedBy,
       cancelledReason: body.cancelledReason,
       updatedAt: new Date(),
+      stockDeducted: false,
+      stockDeductedAt: null,
     }
 
     logOrderSecurityEvent({
@@ -191,8 +200,43 @@ export async function POST(request: Request) {
       }
     }
 
+    const stock = await applyMenuOrderStockChange(db, {
+      orderId,
+      previous: null,
+      next: order,
+      actor: uid,
+    })
+    if (!stock.ok) {
+      return NextResponse.json(
+        {
+          error: stock.error,
+          productId: stock.productId,
+          productName: stock.productName,
+          available: stock.available,
+        },
+        { status: 400 }
+      )
+    }
+    order.stockDeducted = stock.stockDeducted
+    order.stockDeductedAt = stock.stockDeductedAt
+    order.stockReleasedAt = stock.stockReleasedAt
+
     await db.collection("menu_orders").insertOne(order)
     await maybeSendOnlineOrderSms(db, order)
+
+    const syncStatus = String(order.status || "").toLowerCase()
+    if (syncStatus === "sent" || syncStatus === "active" || syncStatus === "paid") {
+      try {
+        const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
+        await upsertAdminOrderFromMenuOrder(db, order, {
+          waiter: (typeof body.receivedBy === "string" && body.receivedBy) || uid,
+          servedAt: null,
+        })
+      } catch (syncErr) {
+        console.error("[catha/menu-orders] admin sync failed on create", syncErr)
+      }
+    }
+
     return NextResponse.json(order, { status: 201 })
   } catch (error: any) {
     console.error("Error creating menu order:", error)
@@ -279,6 +323,34 @@ export async function PUT(request: Request) {
     } else if (updateData.servedAt != null) {
       updateData.servedAt = new Date(updateData.servedAt as any)
     }
+
+    const nextDoc = {
+      ...existing,
+      ...updateData,
+      items: updateData.items !== undefined ? updateData.items : existing.items,
+      status: updateData.status !== undefined ? updateData.status : existing.status,
+    }
+
+    const stock = await applyMenuOrderStockChange(db, {
+      orderId,
+      previous: existing,
+      next: nextDoc,
+      actor: uid,
+    })
+    if (!stock.ok) {
+      return NextResponse.json(
+        {
+          error: stock.error,
+          productId: stock.productId,
+          productName: stock.productName,
+          available: stock.available,
+        },
+        { status: 400 }
+      )
+    }
+    updateData.stockDeducted = stock.stockDeducted
+    updateData.stockDeductedAt = stock.stockDeductedAt
+    updateData.stockReleasedAt = stock.stockReleasedAt
 
     const result = await db
       .collection("menu_orders")

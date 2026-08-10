@@ -40,11 +40,12 @@ import { Textarea } from "@/components/ui/textarea"
 
 const ORDERS_PAGE_SIZE = 72
 
-function menuOrderSource(tx: Transaction): "menu" | "pos" | string {
-  return (
-    (tx as any).orderSource ||
-    ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
-  )
+function menuOrderSource(tx: Transaction): "menu" | "pos" | "online" | string {
+  const raw = String((tx as any).orderSource || "").toLowerCase()
+  if (raw === "menu" || raw === "pos" || raw === "online") return raw
+  if (raw === "ecommerce" || (tx as any).type === "ecommerce") return "online"
+  if ((tx as any).cashier === "Customer" && (tx as any).customerPhone) return "menu"
+  return "pos"
 }
 
 function isMenuUnpaid(tx: Transaction): boolean {
@@ -367,6 +368,7 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "PAID" | "PARTIALLY_PAID" | "NOT_PAID">("all")
   const [paymentFilter, setPaymentFilter] = useState<"all" | "glovo" | "card" | "mpesa">("all")
+  const [sourceFilter, setSourceFilter] = useState<"all" | "menu" | "online" | "pos">("all")
   const [lifecycleFilter, setLifecycleFilter] = useState<"all" | "cancelled">("all")
   const [orders, setOrders] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
@@ -451,7 +453,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     setOrdersPage(1)
-  }, [statusFilter, paymentFilter, lifecycleFilter])
+  }, [statusFilter, paymentFilter, lifecycleFilter, sourceFilter])
 
   useEffect(() => {
     setSelectedOrders(new Set())
@@ -560,6 +562,7 @@ export default function OrdersPage() {
       if (paymentFilter !== "all") params.set("paymentMethod", paymentFilter)
       if (statusFilter !== "all") params.set("paymentStatus", statusFilter)
       if (lifecycleFilter === "cancelled") params.set("lifecycle", "cancelled")
+      if (sourceFilter !== "all") params.set("orderSource", sourceFilter)
 
       const response = await fetch(`/api/catha/orders?${params.toString()}`, {
         cache: "no-store",
@@ -636,7 +639,7 @@ export default function OrdersPage() {
       isFetchingRef.current = false
       setLoading(false)
     }
-  }, [ordersPage, debouncedSearch, statusFilter, paymentFilter, lifecycleFilter, mapOrderRow])
+  }, [ordersPage, debouncedSearch, statusFilter, paymentFilter, lifecycleFilter, sourceFilter, mapOrderRow])
 
   useEffect(() => {
     if (!mounted) return
@@ -1844,7 +1847,7 @@ export default function OrdersPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
               <Input
-                placeholder="Search orders..."
+                placeholder="Search by table #, phone, order…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 h-10 rounded-xl bg-[#f8fafc] border-[#e5e7eb] text-sm w-full"
@@ -1911,6 +1914,15 @@ export default function OrdersPage() {
             <span className="text-xs text-[#64748b] px-2 py-1 rounded-lg bg-white border border-[#e5e7eb]">
               {paymentFilter === "all" ? "All payments" : paymentFilter.charAt(0).toUpperCase() + paymentFilter.slice(1)}
             </span>
+            <span className="text-xs text-[#64748b] px-2 py-1 rounded-lg bg-white border border-[#e5e7eb]">
+              {sourceFilter === "all"
+                ? "All sources"
+                : sourceFilter === "menu"
+                  ? "Menu"
+                  : sourceFilter === "online"
+                    ? "Online"
+                    : "POS"}
+            </span>
             <Button variant="outline" size="sm" className="h-8 w-8 p-0 rounded-lg border-[#e5e7eb]" onClick={() => setFilterSheetOpen(true)}>
               <Filter className="h-4 w-4" />
             </Button>
@@ -1933,7 +1945,7 @@ export default function OrdersPage() {
             <>
             <div className="space-y-3">
               {orders.map((tx) => {
-                const orderSource = (tx as any).orderSource || ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+                const orderSource = menuOrderSource(tx)
                 const isMenuSource = orderSource === "menu"
                 const waiterName = (tx as any).waiter as string | undefined
                 const servedAt = (tx as any).servedAt as string | Date | null | undefined
@@ -2087,7 +2099,7 @@ export default function OrdersPage() {
             <div className="relative flex-1 min-w-[200px] nest-hub-max:min-w-[140px] nest-hub-max:flex-shrink-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#64748b]" />
               <Input
-                placeholder="Search orders, customer, items..."
+                placeholder="Search by table #, phone, order, customer…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 h-10 bg-white border-[#e5e7eb] nest-hub-max:h-9 nest-hub-max:text-sm"
@@ -2124,6 +2136,28 @@ export default function OrdersPage() {
                   }`}
                 >
                   {method === "all" ? "All" : method.charAt(0).toUpperCase() + method.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Source: Menu / Online / POS */}
+            <div className="flex items-center gap-2 nest-hub-max:gap-1.5 nest-hub-max:flex-shrink-0">
+              {([
+                { id: "all", label: "All sources" },
+                { id: "menu", label: "Menu" },
+                { id: "online", label: "Online" },
+                { id: "pos", label: "POS" },
+              ] as const).map((src) => (
+                <button
+                  key={src.id}
+                  onClick={() => setSourceFilter(src.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all nest-hub-max:px-2 nest-hub-max:py-1 nest-hub-max:text-[11px] nest-hub-max:rounded-md ${
+                    sourceFilter === src.id
+                      ? "bg-[#0f172a] text-white"
+                      : "bg-white border border-[#e5e7eb] text-[#64748b] hover:bg-[#f3f4f6]"
+                  }`}
+                >
+                  {src.label}
                 </button>
               ))}
             </div>
@@ -2241,7 +2275,7 @@ export default function OrdersPage() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
                     <Input
-                      placeholder="Search by order #, customer, phone…"
+                      placeholder="Search by table #, phone, order…"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="h-10 w-[280px] pl-10 pr-4 text-sm rounded-xl border-[#e5e7eb] bg-[#f8fafc] focus:bg-white focus:border-[#2563eb] transition-colors"
@@ -2305,6 +2339,23 @@ export default function OrdersPage() {
                             Card
                           </span>
                         </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="h-10 w-[140px] rounded-xl border border-[#e5e7eb] bg-[#f8fafc] animate-pulse" />
+                  )}
+
+                  {/* Source Filter: Menu / Online / POS */}
+                  {mounted ? (
+                    <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as any)}>
+                      <SelectTrigger className="h-10 w-[140px] rounded-xl border-[#e5e7eb] bg-white text-sm font-medium">
+                        <SelectValue placeholder="All sources" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All sources</SelectItem>
+                        <SelectItem value="menu">Menu (/menu)</SelectItem>
+                        <SelectItem value="online">Online</SelectItem>
+                        <SelectItem value="pos">POS</SelectItem>
                       </SelectContent>
                     </Select>
                   ) : (
@@ -2387,7 +2438,7 @@ export default function OrdersPage() {
                   <div className="relative min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
                     <Input
-                      placeholder="Search by order #, customer, phone…"
+                      placeholder="Search by table #, phone, order…"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="h-10 min-h-[40px] pl-10 pr-4 text-sm rounded-xl border-slate-200 bg-white/80 focus:bg-white focus:border-[#2563eb] transition-colors w-full"
@@ -2444,10 +2495,22 @@ export default function OrdersPage() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
+                      <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as any)}>
+                        <SelectTrigger className="h-10 min-h-[40px] w-[110px] rounded-xl border-slate-200 bg-white/80 text-sm font-medium shrink-0">
+                          <SelectValue placeholder="Source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All sources</SelectItem>
+                          <SelectItem value="menu">Menu</SelectItem>
+                          <SelectItem value="online">Online</SelectItem>
+                          <SelectItem value="pos">POS</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </>
                   ) : (
                     <>
                       <div className="h-10 w-[120px] rounded-xl border border-slate-200 bg-slate-100 animate-pulse shrink-0" />
+                      <div className="h-10 w-[110px] rounded-xl border border-slate-200 bg-slate-100 animate-pulse shrink-0" />
                       <div className="h-10 w-[110px] rounded-xl border border-slate-200 bg-slate-100 animate-pulse shrink-0" />
                     </>
                   )}
@@ -2492,7 +2555,7 @@ export default function OrdersPage() {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#94a3b8]" />
                   <Input
-                    placeholder="Search orders…"
+                    placeholder="Search by table #, phone, order…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="h-10 w-full pl-10 pr-4 text-sm rounded-xl border-[#e5e7eb] bg-[#f8fafc] focus:bg-white"
@@ -2525,9 +2588,21 @@ export default function OrdersPage() {
                           <SelectItem value="card">Card</SelectItem>
                         </SelectContent>
                       </Select>
+                      <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as any)}>
+                        <SelectTrigger className="h-10 rounded-xl border-[#e5e7eb] bg-white text-sm">
+                          <SelectValue placeholder="Source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All sources</SelectItem>
+                          <SelectItem value="menu">Menu</SelectItem>
+                          <SelectItem value="online">Online</SelectItem>
+                          <SelectItem value="pos">POS</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </>
                   ) : (
                     <>
+                      <div className="h-10 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] animate-pulse" />
                       <div className="h-10 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] animate-pulse" />
                       <div className="h-10 rounded-xl border border-[#e5e7eb] bg-[#f8fafc] animate-pulse" />
                     </>
@@ -2833,7 +2908,7 @@ export default function OrdersPage() {
               ) : (
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 nest-hub-max:gap-2 nest-hub-max:grid-cols-2">
                   {orders.map((tx) => {
-                    const orderSource = (tx as any).orderSource || ((tx as any).cashier === "Customer" && (tx as any).customerPhone ? "menu" : "pos")
+                    const orderSource = menuOrderSource(tx)
                     const isMenuSource = orderSource === "menu"
                     const waiterName = (tx as any).waiter as string | undefined
                     const servedAt = (tx as any).servedAt as string | Date | null | undefined
@@ -3002,6 +3077,29 @@ export default function OrdersPage() {
                 </div>
               </div>
               <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-[#94a3b8] mb-3">Source</p>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { id: "all", label: "All sources" },
+                    { id: "menu", label: "Menu" },
+                    { id: "online", label: "Online" },
+                    { id: "pos", label: "POS" },
+                  ] as const).map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => { setSourceFilter(s.id); setFilterSheetOpen(false) }}
+                      className={`min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold transition-all touch-manipulation ${
+                        sourceFilter === s.id
+                          ? "bg-[#0f172a] text-white shadow-sm"
+                          : "bg-white border-2 border-[#e2e8f0] text-[#475569] active:bg-[#f8fafc]"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-[#94a3b8] mb-3">Date</p>
                 <div className="flex flex-wrap gap-2">
                   <button className="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-primary text-white shadow-sm touch-manipulation">
@@ -3017,7 +3115,7 @@ export default function OrdersPage() {
               <Button
                 variant="outline"
                 className="flex-1 h-12 rounded-xl font-semibold border-2 border-[#e2e8f0] text-[#475569]"
-                onClick={() => { setStatusFilter("all"); setPaymentFilter("all"); setFilterSheetOpen(false) }}
+                onClick={() => { setStatusFilter("all"); setPaymentFilter("all"); setSourceFilter("all"); setFilterSheetOpen(false) }}
               >
                 Reset
               </Button>

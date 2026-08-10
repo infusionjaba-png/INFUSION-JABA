@@ -1,4 +1,5 @@
 import { Order, OrderStatus, PaymentStatus, PaymentMethod, type CartItem } from "@/types/menu"
+import { createCathaOrderId } from "@/lib/catha-order-id"
 
 /** Minimal fields allowed by POST /api/menu-orders (strict schema). */
 function menuOrderCreateApiPayload(o: Order) {
@@ -95,6 +96,13 @@ function normalizeOrder(o: any): Order {
     updatedAt: o.updatedAt ?? o.createdAt ?? Date.now(),
     items: normalizeCartItems(o.items),
     total: Number(o.total) || 0,
+    staffEditedAt:
+      o.staffEditedAt == null
+        ? null
+        : typeof o.staffEditedAt === "number"
+          ? o.staffEditedAt
+          : new Date(o.staffEditedAt).getTime(),
+    staffEditNotice: o.staffEditNotice ?? null,
   }
 }
 
@@ -144,25 +152,110 @@ class OrderStore {
   private async loadFromMongoDB() {
     if (typeof window === "undefined") return
     try {
-      const response = await fetch("/api/catha/menu-orders")
-      if (!response.ok) return
-      const orders = await response.json()
-      const formattedOrders = orders.map((o: any) =>
-        normalizeOrder({
-          ...o,
-          createdAt:
-            typeof o.createdAt === "number"
-              ? o.createdAt
-              : new Date(o.createdAt).getTime(),
-        })
-      )
-      if (JSON.stringify(this.orders) !== JSON.stringify(formattedOrders)) {
-        this.orders = formattedOrders
+      const params = new URLSearchParams()
+      const localIds = this.orders.map((o) => o.orderId).filter(Boolean)
+      if (localIds.length > 0) {
+        params.set("orderIds", [...new Set(localIds)].slice(0, 40).join(","))
+      }
+
+      try {
+        const cust = sessionStorage.getItem("menu_customer_number")?.trim()
+        if (cust) params.set("customerNumber", cust)
+        const guest = sessionStorage.getItem("menu_guest_session")?.trim()
+        const table = sessionStorage.getItem("menu_table")?.trim()
+        if (guest && table) {
+          params.set("guestSessionId", guest)
+          params.set("tableId", table)
+        }
+      } catch {
+        /* sessionStorage may be blocked */
+      }
+
+      if (![...params.keys()].length) return
+
+      // Prefer public scoped poll (works for /menu guests). Staff pages may still
+      // hit the auth route as a fallback when public returns empty.
+      let formattedOrders: Order[] | null = null
+      const publicRes = await fetch(`/api/menu-orders?${params.toString()}`, {
+        cache: "no-store",
+      })
+      if (publicRes.ok) {
+        const orders = await publicRes.json()
+        if (Array.isArray(orders)) {
+          formattedOrders = orders.map((o: any) =>
+            normalizeOrder({
+              ...o,
+              createdAt:
+                typeof o.createdAt === "number"
+                  ? o.createdAt
+                  : new Date(o.createdAt).getTime(),
+            })
+          )
+        }
+      } else if (publicRes.status === 401 || publicRes.status === 403) {
+        const response = await fetch("/api/catha/menu-orders", { cache: "no-store" })
+        if (!response.ok) return
+        const orders = await response.json()
+        if (!Array.isArray(orders)) return
+        formattedOrders = orders.map((o: any) =>
+          normalizeOrder({
+            ...o,
+            createdAt:
+              typeof o.createdAt === "number"
+                ? o.createdAt
+                : new Date(o.createdAt).getTime(),
+          })
+        )
+      } else {
+        return
+      }
+
+      if (!formattedOrders) return
+
+      const prevById = new Map(this.orders.map((o) => [o.orderId, o]))
+      const staffEdited: Order[] = []
+      const nextById = new Map(prevById)
+
+      for (const server of formattedOrders) {
+        const prev = prevById.get(server.orderId)
+        const prevEdit = prev?.staffEditedAt ?? null
+        const nextEdit = server.staffEditedAt ?? null
+        if (
+          nextEdit != null &&
+          nextEdit !== prevEdit &&
+          // Avoid alerting on first hydrate from empty local state for old edits
+          prev != null
+        ) {
+          staffEdited.push(server)
+        }
+        nextById.set(
+          server.orderId,
+          normalizeOrder({
+            ...(prev || {}),
+            ...server,
+            // Prefer server lines/total when staff edited
+            items: server.items?.length ? server.items : prev?.items || server.items,
+            total: server.total ?? prev?.total,
+          })
+        )
+      }
+
+      const merged = [...nextById.values()]
+      if (JSON.stringify(this.orders) !== JSON.stringify(merged)) {
+        this.orders = merged
         this.saveToStorage()
         this.notifySubscribers()
       }
 
-      for (const order of formattedOrders) {
+      for (const order of staffEdited) {
+        try {
+          window.dispatchEvent(
+            new CustomEvent("menu-order-staff-edited", { detail: order })
+          )
+        } catch {}
+      }
+
+      for (const order of merged) {
         // Re-alert bar for sent/active orders that never made it through
         if (
           (order.status === "sent" || order.status === "active") &&
@@ -270,33 +363,31 @@ class OrderStore {
       createdAt: Date.now(),
     }
 
-    let merged: Order = newOrder
-    try {
-      const response = await fetch("/api/menu-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(menuOrderCreateApiPayload(newOrder)),
-      })
-      if (!response.ok) throw new Error("Failed to save")
-      const saved = await response.json().catch(() => null)
-      if (saved) {
-        merged = normalizeOrder({
+    const response = await fetch("/api/menu-orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(menuOrderCreateApiPayload(newOrder)),
+    })
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null)
+      throw new Error(
+        (errBody && (errBody.error || errBody.message)) ||
+          `Failed to save (${response.status})`
+      )
+    }
+    const saved = await response.json().catch(() => null)
+    const merged: Order = saved
+      ? normalizeOrder({
           ...newOrder,
           ...saved,
-          // Keep client cart images; server lines are authoritative for id/price/qty/name
           items: Array.isArray(saved.items)
             ? mapServerLineItemsToCart(saved.items, newOrder.items)
             : newOrder.items,
           total:
-            typeof saved.total === "number"
-              ? saved.total
-              : newOrder.total,
+            typeof saved.total === "number" ? saved.total : newOrder.total,
           createdAt: newOrder.createdAt,
         })
-      }
-    } catch (e) {
-      console.error("Error saving order:", e)
-    }
+      : newOrder
 
     // Alert bar when order is sent, active, or paid — not for drafts
     if (merged.status === "sent" || merged.status === "active" || merged.status === "paid") {
@@ -313,64 +404,45 @@ class OrderStore {
     const index = this.orders.findIndex((o) => o.orderId === orderId)
     if (index === -1) return null
 
-    const updated = { ...this.orders[index], ...patch, updatedAt: Date.now() }
-    this.orders[index] = updated
+    const previous = this.orders[index]
+    const updated = { ...previous, ...patch, updatedAt: Date.now() }
 
-    try {
-      const response = await fetch("/api/menu-orders", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(menuOrderPutApiPayload(orderId, patch)),
-      })
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => null)
-        throw new Error(
-          (errBody && (errBody.error || errBody.message)) ||
-            `Failed to update (${response.status})`
-        )
-      }
-      const data = await response.json().catch(() => null)
-      const saved = data?.order
-      if (saved) {
-        const normalized = normalizeOrder({
+    const response = await fetch("/api/menu-orders", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(menuOrderPutApiPayload(orderId, patch)),
+    })
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null)
+      throw new Error(
+        (errBody && (errBody.error || errBody.message)) ||
+          `Failed to update (${response.status})`
+      )
+    }
+    const data = await response.json().catch(() => null)
+    const saved = data?.order
+    const normalized = saved
+      ? normalizeOrder({
           ...updated,
           ...saved,
           items: Array.isArray(saved.items)
             ? mapServerLineItemsToCart(saved.items, updated.items)
             : updated.items,
-          total:
-            typeof saved.total === "number" ? saved.total : updated.total,
+          total: typeof saved.total === "number" ? saved.total : updated.total,
         })
-        this.orders[index] = normalized
-        this.saveToStorage()
-        this.notifySubscribers()
+      : updated
 
-        if (patch.status === "sent" || patch.status === "active") {
-          await this.alertBar(normalized)
-        }
-        if (patch.status === "paid" || patch.paymentStatus === "PAID") {
-          await this.syncPaymentToAdmin(normalized)
-        }
-        return normalized
-      }
-    } catch (e) {
-      console.error("Error updating order:", e)
-    }
-
-    // Alert bar when order is newly sent/active (not yet alerted)
-    if (patch.status === "sent" || patch.status === "active") {
-      await this.alertBar(updated)
-    }
-
-    // When payment is completed, sync the admin order's payment status too
-    // (the admin order may already exist from the initial cash alert)
-    if (patch.status === "paid" || patch.paymentStatus === "PAID") {
-      await this.syncPaymentToAdmin(updated)
-    }
-
+    this.orders[index] = normalized
     this.saveToStorage()
     this.notifySubscribers()
-    return updated
+
+    if (patch.status === "sent" || patch.status === "active") {
+      await this.alertBar(normalized)
+    }
+    if (patch.status === "paid" || patch.paymentStatus === "PAID") {
+      await this.syncPaymentToAdmin(normalized)
+    }
+    return normalized
   }
 
   /** Push a payment status update to the admin orders collection */
@@ -465,9 +537,7 @@ class OrderStore {
   }
 
   private generateOrderId(): string {
-    const timestamp = Date.now().toString(36)
-    const random = Math.random().toString(36).substring(2, 8)
-    return `${timestamp}-${random}`.toUpperCase()
+    return createCathaOrderId("menu")
   }
 
   getActiveOrders(): Order[] {
@@ -515,7 +585,7 @@ export const orderStore = (() => {
       getOrdersByTable: () => [],
       getActiveUnpaidOrder: () => undefined,
       getOrdersByCustomer: () => [],
-    } as OrderStore
+    } as unknown as OrderStore
   }
   if (!orderStoreInstance) orderStoreInstance = new OrderStore()
   return orderStoreInstance

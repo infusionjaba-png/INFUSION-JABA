@@ -152,6 +152,7 @@ export async function createPaidEcommerceOrderFromCheckoutSession(
   const order = {
     id: orderId,
     type: 'ecommerce' as const,
+    orderSource: 'online' as const,
     sourceCheckoutSessionId: session.id,
     customerName: snap.customerName,
     customerPhone: session.customerPhone,

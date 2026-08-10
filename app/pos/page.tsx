@@ -8,6 +8,7 @@ import { ReceiptModal } from "@/components/pos/receipt-modal"
 import { TablePanel } from "@/components/pos/table-panel"
 import { CustomItemModal } from "@/components/pos/custom-item-modal"
 import { products, categories, staff, type Product, type Transaction } from "@/lib/dummy-data"
+import { createCathaOrderId } from "@/lib/catha-order-id"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -124,7 +125,7 @@ export default function POSPage() {
     if (method === "pay-later") {
       // Save order as pending without payment
       const newOrder: Transaction = {
-        id: `TXN${Date.now().toString().slice(-8)}`,
+        id: createCathaOrderId("pos"),
         table: selectedTable || 0,
         items: cart.map((item) => ({
           productId: item.id,
@@ -158,7 +159,7 @@ export default function POSPage() {
     }
 
     // Regular payment flow - also save completed order
-    const transactionId = `TXN${Date.now().toString().slice(-8)}`
+    const transactionId = createCathaOrderId("pos")
     const completedOrder: Transaction = {
       id: transactionId,
       table: selectedTable || 0,

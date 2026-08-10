@@ -105,6 +105,12 @@ function ActiveOrderCard({
 
       <StatusTracker step={step} />
 
+      {order.staffEditedAt ? (
+        <p className="mx-1 mb-2 rounded-lg border border-[rgba(217,132,59,0.35)] bg-[rgba(217,132,59,0.12)] px-2.5 py-1.5 text-[11px] text-[#D9843B] font-medium">
+          Updated by staff — check items below
+        </p>
+      ) : null}
+
       <div className={styles.itemsBox}>
         {order.items.map((item, i) => (
           <div key={`${item.id}-${i}`} className={styles.itemsBoxRow}>

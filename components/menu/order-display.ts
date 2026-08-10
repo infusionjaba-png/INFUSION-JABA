@@ -1,9 +1,13 @@
 import { Order } from "@/types/menu"
 
-/** Short display number like #0042 */
+/** Short display like #M482917 (new) or #0042 (legacy) */
 export function formatOrderLabel(order: Order): string {
-  const digits = order.orderId.replace(/\D/g, "")
-  const slice = (digits || order.orderId).slice(-4).padStart(4, "0")
+  const id = String(order.orderId || "").trim()
+  if (/^[MP]\d{6}$/i.test(id)) {
+    return `#${id.toUpperCase()}`
+  }
+  const digits = id.replace(/\D/g, "")
+  const slice = (digits || id).slice(-4).padStart(4, "0")
   return `#${slice}`
 }
 

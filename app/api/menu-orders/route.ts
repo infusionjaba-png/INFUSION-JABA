@@ -5,9 +5,132 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit-simple"
 import { logOrderSecurityEvent } from "@/lib/order-security-audit"
 import { menuOrderCreateSchema, menuOrderPutSchema, formatZodError } from "@/lib/order-request-schemas"
 import { maybeSendOnlineOrderSms } from "@/lib/catha-online-order-sms"
+import { applyMenuOrderStockChange } from "@/lib/menu-order-stock"
+import { phoneSearchVariants } from "@/lib/catha-orders-list-filter"
 
 // Public-facing menu orders API used by /menu (QR + phone).
 // Writes into the same `menu_orders` collection that Catha staff see via /api/catha/menu-orders.
+
+function formatPublicMenuOrder(order: any) {
+  return {
+    orderId: order.orderId,
+    createdAt:
+      order.createdAt instanceof Date
+        ? order.createdAt.getTime()
+        : new Date(order.createdAt).getTime(),
+    updatedAt: order.updatedAt
+      ? order.updatedAt instanceof Date
+        ? order.updatedAt.getTime()
+        : new Date(order.updatedAt).getTime()
+      : undefined,
+    tableId: order.tableId,
+    tableNumber: order.tableNumber ?? order.tableId,
+    customerNumber: order.customerNumber ?? order.customerPart ?? null,
+    guestSessionId: order.guestSessionId ?? null,
+    customerPhone: order.customerPhone,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.paymentMethod ?? null,
+    items: order.items || [],
+    total: order.total,
+    subtotal: order.subtotal,
+    lastSentAt: order.lastSentAt
+      ? order.lastSentAt instanceof Date
+        ? order.lastSentAt.getTime()
+        : new Date(order.lastSentAt).getTime()
+      : undefined,
+    receivedBy: order.receivedBy,
+    servedAt: order.servedAt
+      ? order.servedAt instanceof Date
+        ? order.servedAt.getTime()
+        : new Date(order.servedAt).getTime()
+      : undefined,
+    servedBy: order.servedBy ?? null,
+    cancelledReason: order.cancelledReason,
+    mpesaReceiptNumber: order.mpesaReceiptNumber ?? null,
+    staffEditedAt: order.staffEditedAt
+      ? order.staffEditedAt instanceof Date
+        ? order.staffEditedAt.getTime()
+        : new Date(order.staffEditedAt).getTime()
+      : null,
+    staffEditNotice: order.staffEditNotice ?? null,
+  }
+}
+
+/**
+ * Scoped poll for /menu clients. Requires orderIds and/or customer identity —
+ * never returns the full collection.
+ */
+export async function GET(request: Request) {
+  try {
+    const ip = getClientIp(request)
+    const rl = checkRateLimit(`menu-orders-get:${ip}`, 120, 60_000)
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many requests", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      )
+    }
+
+    const { searchParams } = new URL(request.url)
+    const orderIdsRaw = (searchParams.get("orderIds") || "").trim()
+    const customerNumber = (searchParams.get("customerNumber") || "").trim()
+    const guestSessionId = (searchParams.get("guestSessionId") || "").trim()
+    const tableId = (searchParams.get("tableId") || searchParams.get("table") || "").trim()
+
+    const orderIds = orderIdsRaw
+      ? [...new Set(orderIdsRaw.split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 40)
+      : []
+
+    if (orderIds.length === 0 && !customerNumber && !(guestSessionId && tableId)) {
+      return NextResponse.json(
+        { error: "Provide orderIds, customerNumber, or guestSessionId+tableId" },
+        { status: 400 }
+      )
+    }
+
+    const or: Record<string, unknown>[] = []
+    if (orderIds.length > 0) {
+      or.push({ orderId: { $in: orderIds } })
+    }
+    if (customerNumber) {
+      const variants = phoneSearchVariants(customerNumber)
+      const phones = [...new Set([customerNumber, ...variants])]
+      or.push({ customerNumber: { $in: phones } })
+      or.push({ customerPhone: { $in: phones } })
+      // Partial regex for loosely stored numbers
+      for (const v of phones.slice(0, 6)) {
+        const esc = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        or.push({ customerNumber: { $regex: esc } })
+        or.push({ customerPhone: { $regex: esc } })
+      }
+    }
+    if (guestSessionId && tableId) {
+      or.push({
+        guestSessionId,
+        $or: [{ tableId }, { tableNumber: tableId }, { tableId: String(Number(tableId) || tableId) }],
+      })
+    }
+
+    const db = await getDatabase("infusion_jaba")
+    const orders = await db
+      .collection("menu_orders")
+      .find({ $or: or })
+      .sort({ createdAt: -1 })
+      .limit(60)
+      .toArray()
+
+    return NextResponse.json(orders.map(formatPublicMenuOrder), {
+      headers: { "Cache-Control": "no-store" },
+    })
+  } catch (error: any) {
+    console.error("[menu-orders] GET error:", error)
+    return NextResponse.json(
+      { error: "Failed to fetch menu orders", message: error.message },
+      { status: 500 }
+    )
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -77,6 +200,8 @@ export async function POST(request: Request) {
       receivedBy: body.receivedBy,
       cancelledReason: body.cancelledReason,
       updatedAt: new Date(),
+      stockDeducted: false,
+      stockDeductedAt: null,
     }
 
     logOrderSecurityEvent({
@@ -129,8 +254,43 @@ export async function POST(request: Request) {
       }
     }
 
+    const stock = await applyMenuOrderStockChange(db, {
+      orderId,
+      previous: null,
+      next: order,
+      actor: "Customer",
+    })
+    if (!stock.ok) {
+      return NextResponse.json(
+        {
+          error: stock.error,
+          productId: stock.productId,
+          productName: stock.productName,
+          available: stock.available,
+        },
+        { status: 400 }
+      )
+    }
+    order.stockDeducted = stock.stockDeducted
+    order.stockDeductedAt = stock.stockDeductedAt
+    order.stockReleasedAt = stock.stockReleasedAt
+
     await db.collection("menu_orders").insertOne(order)
     await maybeSendOnlineOrderSms(db, order)
+
+    const syncStatus = String(order.status || "").toLowerCase()
+    if (syncStatus === "sent" || syncStatus === "active" || syncStatus === "paid") {
+      try {
+        const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
+        await upsertAdminOrderFromMenuOrder(db, order, {
+          waiter: "Customer",
+          servedAt: null,
+        })
+      } catch (syncErr) {
+        console.error("[menu-orders] admin sync failed on create", syncErr)
+      }
+    }
+
     return NextResponse.json(order, { status: 201 })
   } catch (error: any) {
     console.error("[menu-orders] POST error:", error)
@@ -206,6 +366,34 @@ export async function PUT(request: Request) {
       updateData.lastSentAt = new Date()
     }
 
+    const nextDoc = {
+      ...existing,
+      ...updateData,
+      items: updateData.items !== undefined ? updateData.items : existing.items,
+      status: updateData.status !== undefined ? updateData.status : existing.status,
+    }
+
+    const stock = await applyMenuOrderStockChange(db, {
+      orderId,
+      previous: existing,
+      next: nextDoc,
+      actor: "Customer",
+    })
+    if (!stock.ok) {
+      return NextResponse.json(
+        {
+          error: stock.error,
+          productId: stock.productId,
+          productName: stock.productName,
+          available: stock.available,
+        },
+        { status: 400 }
+      )
+    }
+    updateData.stockDeducted = stock.stockDeducted
+    updateData.stockDeductedAt = stock.stockDeductedAt
+    updateData.stockReleasedAt = stock.stockReleasedAt
+
     const result = await db
       .collection("menu_orders")
       .updateOne({ orderId }, { $set: updateData })
@@ -220,16 +408,18 @@ export async function PUT(request: Request) {
     if (syncStatus === "sent" || syncStatus === "active" || syncStatus === "paid") {
       try {
         const { upsertAdminOrderFromMenuOrder } = await import("@/lib/menu-order-admin-sync")
-        const hasExplicitServe = Boolean(updated?.servedAt)
-        await upsertAdminOrderFromMenuOrder(db, updated, {
-          waiter: updated?.receivedBy || "Customer",
-          ...(hasExplicitServe
-            ? {
-                servedAt: new Date(updated.servedAt as any),
-                servedBy: updated?.servedBy || updated?.receivedBy || "Server",
-              }
-            : { servedAt: null }),
-        })
+        if (updated) {
+          const hasExplicitServe = Boolean(updated.servedAt)
+          await upsertAdminOrderFromMenuOrder(db, updated, {
+            waiter: updated.receivedBy || "Customer",
+            ...(hasExplicitServe
+              ? {
+                  servedAt: new Date(updated.servedAt as any),
+                  servedBy: updated.servedBy || updated.receivedBy || "Server",
+                }
+              : { servedAt: null }),
+          })
+        }
       } catch (syncErr) {
         console.error("[menu-orders] admin sync failed", syncErr)
       }

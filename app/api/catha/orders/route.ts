@@ -22,6 +22,7 @@ import { normalizeKenyaPhone } from '@/lib/phone-utils'
 import { baseLinkedListFromOrder } from '@/lib/catha-append-mpesa-payment'
 import { deleteAllAllocationsForOrder, refreshMpesaTransactionLinkMetadata } from '@/lib/catha-mpesa-order-allocations'
 import { filterInventoryStockLineItems, orderLineFingerprintParts } from '@/lib/catha-order-inventory-lines'
+import { createCathaOrderId } from '@/lib/catha-order-id'
 import { buildOrdersListMongoFilter, mergeCathaOrdersMainListFilter } from '@/lib/catha-orders-list-filter'
 import { computeOrdersDashboardSummary } from '@/lib/catha-orders-dashboard-summary'
 import {
@@ -57,7 +58,9 @@ function orderDocumentToJsonSafe(order: any) {
       id: String(order?.id || order?._id || 'unknown'),
       table: order?.table ?? null,
       orderType: order?.orderType || 'INHOUSE',
-      orderSource: order?.orderSource || null,
+      orderSource:
+        order?.orderSource ||
+        (order?.type === 'ecommerce' ? 'online' : null),
       items: Array.isArray(order?.items) ? order.items : [],
       subtotal: Number(order?.subtotal) || 0,
       vat: Number(order?.vat) || 0,
@@ -87,7 +90,9 @@ function orderDocumentToJson(order: any) {
     id: order.id || order._id?.toString(),
     table: order.table,
     orderType: order.orderType || 'INHOUSE',
-    orderSource: order.orderSource || null,
+    orderSource:
+      order.orderSource ||
+      (order.type === 'ecommerce' ? 'online' : null),
     items: Array.isArray(order.items) ? order.items : [],
     subtotal: order.subtotal,
     vat: order.vat,
@@ -157,15 +162,19 @@ export async function GET(request: Request) {
       const paymentMethodRaw = (searchParams.get('paymentMethod') || 'all').toLowerCase()
       const paymentStatusRaw = (searchParams.get('paymentStatus') || 'all').toUpperCase()
       const lifecycle = searchParams.get('lifecycle') === 'cancelled' ? 'cancelled' : 'all'
+      const orderSourceRaw = (searchParams.get('orderSource') || 'all').toLowerCase()
       const paymentMethod = (['all', 'glovo', 'mpesa', 'card'].includes(paymentMethodRaw)
         ? paymentMethodRaw
         : 'all') as 'all' | 'glovo' | 'mpesa' | 'card'
       const paymentStatus = (['all', 'PAID', 'PARTIALLY_PAID', 'NOT_PAID'].includes(paymentStatusRaw)
         ? paymentStatusRaw
         : 'all') as 'all' | 'PAID' | 'PARTIALLY_PAID' | 'NOT_PAID'
+      const orderSource = (['all', 'menu', 'online', 'pos'].includes(orderSourceRaw)
+        ? orderSourceRaw
+        : 'all') as 'all' | 'menu' | 'online' | 'pos'
 
       const filter = mergeCathaOrdersMainListFilter(
-        buildOrdersListMongoFilter({ q, paymentMethod, paymentStatus, lifecycle })
+        buildOrdersListMongoFilter({ q, paymentMethod, paymentStatus, lifecycle, orderSource })
       )
       const coll = db.collection('orders')
       // Menu rounds needing Accept (2) or Served (1) float above everything else.
@@ -406,7 +415,7 @@ export async function POST(request: Request) {
     const paymentStatus = deriveInitialPaymentStatusForCatha(body)
 
     const order = {
-      id: body.id || `TXN${Date.now().toString().slice(-8)}`,
+      id: body.id || createCathaOrderId('pos'),
       table: body.table,
       orderType: body.orderType || 'INHOUSE',
       orderSource: body.orderSource || 'pos',
@@ -974,24 +983,19 @@ export async function PUT(request: Request) {
       )
     }
 
-    // ── Sync back to menu_orders so the customer's tracking screen updates ──
-    // The order's `id` is the same as `orderId` in menu_orders (set by alertBar)
-    if (newStatus === 'completed') {
-      await db.collection('menu_orders').updateOne(
-        { orderId: id },
-        { $set: {
-            status: 'paid',
-            paymentStatus: 'PAID',
-            paymentMethod: updateData.paymentMethod || existingOrder.paymentMethod || 'cash',
-            updatedAt: new Date(),
-          }
-        }
+    // ── Sync back to menu_orders so the customer's /menu screen updates ──
+    // Same id as menu_orders.orderId; item edits set staffEditedAt for client alert.
+    try {
+      const { syncAdminOrderEditsToMenuOrder } = await import('@/lib/sync-admin-order-to-menu')
+      const latest = await db.collection('orders').findOne({ id })
+      await syncAdminOrderEditsToMenuOrder(
+        db,
+        id,
+        existingOrder as Record<string, unknown>,
+        (latest || { ...existingOrder, ...updateData, id }) as Record<string, unknown>
       )
-    } else if (newStatus === 'cancelled') {
-      await db.collection('menu_orders').updateOne(
-        { orderId: id },
-        { $set: { status: 'cancelled', updatedAt: new Date() } }
-      )
+    } catch (syncErr) {
+      console.error('[Orders API] menu_orders sync failed', id, syncErr)
     }
 
     if (newStatus === 'completed') {

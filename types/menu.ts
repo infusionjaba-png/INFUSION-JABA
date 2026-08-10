@@ -63,6 +63,9 @@ export interface Order {
   servedAt?: number | string | null
   servedBy?: string | null
   cancelledReason?: string
+  /** Set when POS/staff edits this menu round — client shows an alert */
+  staffEditedAt?: number | null
+  staffEditNotice?: string | null
 }
 
 export interface MenuCategory {

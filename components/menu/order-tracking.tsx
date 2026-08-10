@@ -147,6 +147,19 @@ export function OrderTracking({
             {status.label}
           </span>
         </div>
+
+        {order.staffEditedAt ? (
+          <div
+            role="status"
+            className="mt-4 rounded-xl border border-[rgba(217,132,59,0.35)] bg-[rgba(217,132,59,0.12)] px-3 py-2.5 text-[12px] text-[#F5EBDC] leading-snug"
+          >
+            <p className="font-semibold text-[#D9843B] mb-0.5">Updated by staff</p>
+            <p className="text-[rgba(242,232,216,0.8)]">
+              {order.staffEditNotice ||
+                "Staff changed your order. Review items and total below."}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {/* Info grid */}
