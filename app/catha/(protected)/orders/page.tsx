@@ -1773,7 +1773,11 @@ export default function OrdersPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.success !== true) {
-        throw new Error(data?.reason || data?.error || "Failed to resend receipt SMS")
+        const detail = [data?.reason, data?.lastError, data?.message, data?.error]
+          .filter(Boolean)
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .join(" — ")
+        throw new Error(detail || "Failed to resend receipt SMS")
       }
 
       if (data?.order) {
@@ -1782,7 +1786,12 @@ export default function OrdersPage() {
       } else {
         await fetchOrders()
       }
-      toast.success(`Receipt SMS sent for ${order.id}`, { id: `resend-sms-${order.id}` })
+      toast.success(
+        data?.phone
+          ? `Receipt SMS sent to ${data.phone} for ${order.id}`
+          : `Receipt SMS sent for ${order.id}`,
+        { id: `resend-sms-${order.id}` }
+      )
     } catch (e: any) {
       toast.error(e?.message || "Failed to resend receipt SMS", { id: `resend-sms-${order.id}` })
     }

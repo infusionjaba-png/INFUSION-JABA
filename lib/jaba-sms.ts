@@ -86,11 +86,13 @@ export async function saveJabaSmsSettings(settings: Partial<JabaSmsSettings> & {
 }
 
 function isSmsConfigured(): boolean {
-  return Boolean(
-    process.env.ZETTATEL_USER_ID &&
-      process.env.ZETTATEL_PASSWORD &&
-      process.env.ZETTATEL_SENDER_ID
+  const hasUserPass = Boolean(
+    process.env.ZETTATEL_USER_ID?.trim() && process.env.ZETTATEL_PASSWORD?.trim()
   )
+  const hasApiKey = Boolean(process.env.ZETTATEL_API_KEY?.trim())
+  const hasSender = Boolean(process.env.ZETTATEL_SENDER_ID?.trim())
+  // Zettatel accepts userId+password OR apiKey header — sender id is always required.
+  return hasSender && (hasUserPass || hasApiKey)
 }
 
 /** Zettatel requires country code without leading +. Example: 2547XXXXXXXX */
@@ -128,7 +130,9 @@ function parseZettatelResponse(text: string): {
     const success =
       status === 'success' ||
       statusCode === '200' ||
-      reason.toLowerCase() === 'success'
+      reason.toLowerCase() === 'success' ||
+      // Some accounts return a transaction id with an empty/odd status wrapper.
+      Boolean(transactionId && !status.includes('error') && !status.includes('fail'))
 
     if (!success) {
       return {
@@ -159,33 +163,43 @@ function parseZettatelResponse(text: string): {
   }
 }
 
-async function deliverJabaSms(message: string, numbers: string[]): Promise<{ transactionId?: string }> {
+async function deliverJabaSms(
+  message: string,
+  numbers: string[],
+  options?: { allowDuplicateCheck?: boolean }
+): Promise<{ transactionId?: string }> {
   const mobiles = formatZettatelMobiles(numbers)
   if (mobiles.length === 0) {
     throw new Error('Cannot send SMS: no valid gateway mobile numbers')
   }
 
   const endpoint = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send'
+  const hasUserPass = Boolean(
+    process.env.ZETTATEL_USER_ID?.trim() && process.env.ZETTATEL_PASSWORD?.trim()
+  )
   const payload = new URLSearchParams({
-    // Zettatel expects lowercase `userid` parameter.
-    userid: process.env.ZETTATEL_USER_ID || '',
-    // Keep camelCase variant as compatibility fallback.
-    userId: process.env.ZETTATEL_USER_ID || '',
-    password: process.env.ZETTATEL_PASSWORD || '',
     sendMethod: 'quick',
     mobile: mobiles.join(','),
     msg: message,
     senderid: process.env.ZETTATEL_SENDER_ID || '',
     msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
-    duplicatecheck: 'true',
+    // false so manual resends of the same receipt are not dropped
+    duplicatecheck: options?.allowDuplicateCheck === true ? 'true' : 'false',
     output: 'json',
   })
+  if (hasUserPass) {
+    // Zettatel expects lowercase `userid` parameter.
+    payload.set('userid', process.env.ZETTATEL_USER_ID || '')
+    // Keep camelCase variant as compatibility fallback.
+    payload.set('userId', process.env.ZETTATEL_USER_ID || '')
+    payload.set('password', process.env.ZETTATEL_PASSWORD || '')
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
   }
-  if (process.env.ZETTATEL_API_KEY) {
-    headers.apikey = process.env.ZETTATEL_API_KEY
+  if (process.env.ZETTATEL_API_KEY?.trim()) {
+    headers.apikey = process.env.ZETTATEL_API_KEY.trim()
   }
 
   console.log('[Jaba SMS] Sending request', {
@@ -194,7 +208,9 @@ async function deliverJabaSms(message: string, numbers: string[]): Promise<{ tra
     recipientCount: mobiles.length,
     senderId: process.env.ZETTATEL_SENDER_ID,
     msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
-    hasApiKey: Boolean(process.env.ZETTATEL_API_KEY),
+    hasApiKey: Boolean(process.env.ZETTATEL_API_KEY?.trim()),
+    hasUserPass,
+    duplicatecheck: payload.get('duplicatecheck'),
   })
 
   const controller = new AbortController()
@@ -248,7 +264,7 @@ export async function sendJabaSms(message: string, numbers: string[]) {
   }
   if (!isSmsConfigured()) {
     console.error(
-      '[Jaba SMS] Skipped: missing env config. Required ZETTATEL_USER_ID, ZETTATEL_PASSWORD, ZETTATEL_SENDER_ID'
+      '[Jaba SMS] Skipped: missing env config. Required ZETTATEL_SENDER_ID plus (ZETTATEL_USER_ID+ZETTATEL_PASSWORD or ZETTATEL_API_KEY)'
     )
     return
   }
@@ -259,7 +275,8 @@ export async function sendJabaSms(message: string, numbers: string[]) {
 /** Use for security-sensitive flows (e.g. delete OTP) so failures surface instead of succeeding silently. */
 export async function sendJabaSmsStrict(
   message: string,
-  numbers: string[]
+  numbers: string[],
+  options?: { allowDuplicateCheck?: boolean }
 ): Promise<{ transactionId?: string }> {
   if (!message.trim()) {
     throw new Error('Cannot send SMS: empty message')
@@ -269,10 +286,10 @@ export async function sendJabaSmsStrict(
   }
   if (!isSmsConfigured()) {
     throw new Error(
-      'SMS gateway is not configured. Set ZETTATEL_USER_ID, ZETTATEL_PASSWORD, and ZETTATEL_SENDER_ID in the environment.'
+      'SMS gateway is not configured. Set ZETTATEL_SENDER_ID and either ZETTATEL_USER_ID+ZETTATEL_PASSWORD or ZETTATEL_API_KEY.'
     )
   }
-  return deliverJabaSms(message, numbers)
+  return deliverJabaSms(message, numbers, options)
 }
 
 export async function sendJabaSmsForEvent(event: keyof JabaSmsEventSettings, message: string) {

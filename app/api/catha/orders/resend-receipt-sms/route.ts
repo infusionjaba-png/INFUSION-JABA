@@ -19,19 +19,31 @@ export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}))
     const orderId = typeof body?.orderId === 'string' ? body.orderId.trim() : ''
+    const phoneOverride =
+      typeof body?.phone === 'string' && body.phone.trim() ? body.phone.trim() : null
     if (!orderId) {
       return NextResponse.json({ error: 'orderId is required' }, { status: 400 })
     }
 
     const db = await getDatabase('infusion_jaba')
-    const result = await maybeSendCathaPaymentReceiptSms(db, orderId, { force: true })
+    const before = await db.collection('orders').findOne({ id: orderId })
+    const result = await maybeSendCathaPaymentReceiptSms(db, orderId, {
+      force: true,
+      phoneOverride,
+    })
     const order = await db.collection('orders').findOne({ id: orderId })
 
     if (!result.sent) {
+      const lastError =
+        (order as any)?.paymentReceiptSmsLastError ||
+        (before as any)?.paymentReceiptSmsLastError ||
+        null
       return NextResponse.json(
         {
           success: false,
-          reason: result.reason || 'sms_send_failed',
+          reason: result.reason || lastError || 'sms_send_failed',
+          phone: result.phone ?? null,
+          lastError,
           order: order || null,
         },
         { status: 400 }
@@ -40,6 +52,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      phone: result.phone ?? null,
       order: order || null,
     })
   } catch (error: any) {
