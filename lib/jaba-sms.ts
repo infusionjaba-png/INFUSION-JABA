@@ -183,6 +183,17 @@ function parseZettatelResponse(text: string): {
   }
 }
 
+function isZettatelAuthFailure(reasonOrBody: string): boolean {
+  const lower = String(reasonOrBody || '').toLowerCase()
+  return (
+    lower.includes('invalid login') ||
+    lower.includes('invalid credentials') ||
+    lower.includes('authentication') ||
+    lower.includes('"code":"401"') ||
+    lower.includes('"statuscode":"401"')
+  )
+}
+
 async function deliverJabaSms(
   message: string,
   numbers: string[],
@@ -200,89 +211,117 @@ async function deliverJabaSms(
     )
   }
 
-  const endpoint = cfg.apiUrl || 'https://portal.zettatel.com/SMSApi/send'
   const hasUserPass = Boolean(cfg.userId && cfg.password)
   const hasApiKey = Boolean(cfg.apiKey)
-  // Zettatel docs: authenticate with userId+password OR apiKey — not both at once.
-  // Prefer a complete user/password pair; otherwise use API key only.
-  const authMode: 'userpass' | 'apikey' = hasUserPass ? 'userpass' : 'apikey'
-  if (authMode === 'apikey' && !hasApiKey) {
+  // Zettatel: use userId+password OR apiKey — never both in one request.
+  // If the first mode gets Invalid Login, retry the other when available.
+  const modes: Array<'userpass' | 'apikey'> = []
+  if (cfg.preferApiKey && hasApiKey) {
+    modes.push('apikey')
+    if (hasUserPass) modes.push('userpass')
+  } else {
+    if (hasUserPass) modes.push('userpass')
+    if (hasApiKey) modes.push('apikey')
+  }
+  if (modes.length === 0) {
     throw new Error(
       'SMS gateway auth incomplete. Set User ID + Password, or API Key (Settings → SMS / ZETTATEL_*).'
     )
   }
 
-  const payload = new URLSearchParams({
-    sendMethod: 'quick',
-    mobile: mobiles.join(','),
-    msg: message,
-    senderid: cfg.senderId,
-    msgType: cfg.msgType || 'text',
-    // false so manual resends of the same receipt are not dropped
-    duplicatecheck: options?.allowDuplicateCheck === true ? 'true' : 'false',
-    output: 'json',
-  })
-  if (authMode === 'userpass') {
-    // Zettatel expects lowercase `userid` parameter.
-    payload.set('userid', cfg.userId)
-    payload.set('password', cfg.password)
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  }
-  if (authMode === 'apikey') {
-    headers.apikey = cfg.apiKey
-  }
-
-  console.log('[Jaba SMS] Sending request', {
-    endpoint,
-    recipients: mobiles,
-    recipientCount: mobiles.length,
-    senderId: cfg.senderId,
-    msgType: cfg.msgType || 'text',
-    authMode,
-    duplicatecheck: payload.get('duplicatecheck'),
-  })
-
-  const controller = new AbortController()
+  const endpoint = cfg.apiUrl || 'https://portal.zettatel.com/SMSApi/send'
   const timeoutMs = Math.max(5_000, Math.min(25_000, Number(process.env.ZETTATEL_TIMEOUT_MS) || 20_000))
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let lastError: Error | null = null
 
-  let res: Response
-  let text: string
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: payload.toString(),
-      signal: controller.signal,
+  for (let i = 0; i < modes.length; i++) {
+    const authMode = modes[i]!
+    const payload = new URLSearchParams({
+      sendMethod: 'quick',
+      mobile: mobiles.join(','),
+      msg: message,
+      senderid: cfg.senderId,
+      msgType: cfg.msgType || 'text',
+      duplicatecheck: options?.allowDuplicateCheck === true ? 'true' : 'false',
+      output: 'json',
     })
-    text = await res.text()
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`Zettatel timed out after ${timeoutMs}ms`)
+    if (authMode === 'userpass') {
+      payload.set('userid', cfg.userId)
+      payload.set('password', cfg.password)
     }
-    throw error
-  } finally {
-    clearTimeout(timeout)
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    }
+    if (authMode === 'apikey') {
+      headers.apikey = cfg.apiKey
+    }
+
+    console.log('[Jaba SMS] Sending request', {
+      endpoint,
+      recipients: mobiles,
+      recipientCount: mobiles.length,
+      senderId: cfg.senderId,
+      msgType: cfg.msgType || 'text',
+      authMode,
+      attempt: i + 1,
+      attemptsTotal: modes.length,
+      duplicatecheck: payload.get('duplicatecheck'),
+    })
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+    let res: Response
+    let text: string
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: payload.toString(),
+        signal: controller.signal,
+      })
+      text = await res.text()
+    } catch (error: any) {
+      clearTimeout(timeout)
+      if (error?.name === 'AbortError') {
+        lastError = new Error(`Zettatel timed out after ${timeoutMs}ms`)
+      } else {
+        lastError = error instanceof Error ? error : new Error(String(error))
+      }
+      continue
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    console.log('[Jaba SMS] Provider response', {
+      status: res.status,
+      ok: res.ok,
+      authMode,
+      body: text,
+    })
+
+    if (!res.ok) {
+      lastError = new Error(`Zettatel failed: ${res.status} ${text}`)
+      if (isZettatelAuthFailure(text) && i < modes.length - 1) {
+        console.warn('[Jaba SMS] Auth rejected — retrying with alternate credentials')
+        continue
+      }
+      throw lastError
+    }
+
+    const parsed = parseZettatelResponse(text)
+    if (!parsed.ok) {
+      lastError = new Error(`Zettatel rejected SMS: ${humanizeZettatelReason(parsed.reason)}`)
+      if (isZettatelAuthFailure(parsed.reason) && i < modes.length - 1) {
+        console.warn('[Jaba SMS] Auth rejected — retrying with alternate credentials')
+        continue
+      }
+      throw lastError
+    }
+    return { transactionId: parsed.transactionId }
   }
 
-  console.log('[Jaba SMS] Provider response', {
-    status: res.status,
-    ok: res.ok,
-    body: text,
-  })
-
-  if (!res.ok) {
-    throw new Error(`Zettatel failed: ${res.status} ${text}`)
-  }
-
-  const parsed = parseZettatelResponse(text)
-  if (!parsed.ok) {
-    throw new Error(`Zettatel rejected SMS: ${humanizeZettatelReason(parsed.reason)}`)
-  }
-  return { transactionId: parsed.transactionId }
+  throw lastError || new Error('Zettatel SMS send failed')
 }
 
 export async function sendJabaSms(message: string, numbers: string[]) {

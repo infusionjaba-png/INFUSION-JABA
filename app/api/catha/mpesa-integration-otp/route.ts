@@ -54,7 +54,12 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to send OTP'
     console.error('[M-Pesa integration OTP] request error:', error)
-    return NextResponse.json({ success: false, error: message }, { status: 400 })
+    const isGateway =
+      /zettatel|sms gateway|cannot send sms|not configured|auth incomplete/i.test(message)
+    return NextResponse.json(
+      { success: false, error: message, code: isGateway ? 'sms_gateway' : 'otp_request' },
+      { status: isGateway ? 502 : 400 }
+    )
   }
 }
 

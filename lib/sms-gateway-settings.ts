@@ -52,6 +52,8 @@ export type ResolvedSmsGatewayConfig = {
   msgType: string
   adminOtpPhones: string
   configured: boolean
+  /** When true, try API key auth before user/password. */
+  preferApiKey?: boolean
 }
 
 const DEFAULTS: SmsGatewaySettings = {
@@ -102,11 +104,8 @@ export async function getSmsGatewaySettings(): Promise<SmsGatewaySettings> {
 }
 
 /**
- * Prefer non-empty settings fields; fall back to env for anything blank.
- * Auth priority (avoids Zettatel "Invalid Login" from mixed credentials):
- * 1. Settings userId+password pair
- * 2. Settings API key alone (ignores env user/password)
- * 3. Env user/password or env API key
+ * Collect gateway credentials without mixing a half settings pair with env.
+ * Both user/password and apiKey may be present so deliver can retry auth modes.
  */
 export async function resolveSmsGatewayConfig(): Promise<ResolvedSmsGatewayConfig> {
   const stored = await getSmsGatewaySettings()
@@ -116,30 +115,18 @@ export async function resolveSmsGatewayConfig(): Promise<ResolvedSmsGatewayConfi
 
   let userId = ''
   let password = ''
-  let apiKey = ''
-
   if (stored.userId && stored.password) {
     userId = stored.userId
     password = stored.password
-  } else if (stored.apiKey) {
-    apiKey = stored.apiKey
   } else if (envUserId && envPassword) {
     userId = envUserId
     password = envPassword
-    apiKey = envApiKey
-  } else if (envApiKey) {
-    apiKey = envApiKey
-  } else if (stored.userId || stored.password) {
-    // Incomplete settings pair and no usable env — best effort
+  } else {
     userId = stored.userId || envUserId
     password = stored.password || envPassword
-    apiKey = envApiKey
-  } else {
-    userId = envUserId
-    password = envPassword
-    apiKey = envApiKey
   }
 
+  const apiKey = stored.apiKey || envApiKey
   const senderId = stored.senderId || env('ZETTATEL_SENDER_ID')
   const apiUrl = stored.apiUrl || env('ZETTATEL_API_URL') || 'https://portal.zettatel.com/SMSApi/send'
   const msgType = stored.msgType || env('ZETTATEL_MSG_TYPE') || 'text'
@@ -157,6 +144,8 @@ export async function resolveSmsGatewayConfig(): Promise<ResolvedSmsGatewayConfi
     msgType,
     adminOtpPhones,
     configured,
+    /** Prefer API key when settings explicitly saved one without a full user/pass pair. */
+    preferApiKey: Boolean(stored.apiKey && !(stored.userId && stored.password)),
   }
 }
 

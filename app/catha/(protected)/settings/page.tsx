@@ -386,7 +386,13 @@ export default function SettingsPage() {
       })
       const data = await response.json()
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to send OTP')
+        const errMsg = String(data.error || 'Failed to send OTP')
+        console.error('[M-Pesa OTP send failed]', {
+          status: response.status,
+          error: errMsg,
+          action,
+        })
+        throw new Error(errMsg)
       }
       toast({
         title: "OTP sent",
@@ -397,7 +403,11 @@ export default function SettingsPage() {
       return true
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to send OTP'
-      toast({ title: "Error", description: message, variant: "destructive" })
+      toast({
+        title: /invalid login|zettatel|sms gateway/i.test(message) ? 'SMS send failed' : 'Error',
+        description: message,
+        variant: 'destructive',
+      })
       return false
     } finally {
       setOtpSending(false)
