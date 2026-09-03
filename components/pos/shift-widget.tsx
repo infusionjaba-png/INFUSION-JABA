@@ -139,6 +139,7 @@ export function ShiftWidget({ cashierName }: { cashierName: string }) {
 
   useEffect(() => {
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
       refresh().catch(() => {})
     }, 60_000)
     const onVisible = () => {

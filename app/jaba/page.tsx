@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +9,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Plus, Truck, Package, TrendingUp, Factory, ArrowRight, AlertTriangle, FileText, Boxes, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 
 interface DashboardData {
   dashboardStats: {
@@ -80,30 +81,34 @@ export default function JabaDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function fetchDashboardData() {
-      try {
-        setLoading(true)
-        setError(null)
-        const response = await fetch('/api/jaba/dashboard')
-        if (!response.ok) {
-          throw new Error('Failed to fetch dashboard data')
-        }
-        const result = await response.json()
-        setData(result)
-      } catch (err: any) {
-        console.error('Error fetching dashboard data:', err)
-        setError(err.message || 'Failed to load dashboard data')
-      } finally {
-        setLoading(false)
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch('/api/jaba/dashboard')
+      if (!response.ok) {
+        throw new Error('Failed to fetch dashboard data')
       }
+      const result = await response.json()
+      setData(result)
+    } catch (err: any) {
+      console.error('Error fetching dashboard data:', err)
+      setError(err.message || 'Failed to load dashboard data')
+    } finally {
+      setLoading(false)
     }
-
-    fetchDashboardData()
-    // Refresh data every 30 seconds
-    const interval = setInterval(fetchDashboardData, 30000)
-    return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    fetchDashboardData()
+  }, [fetchDashboardData])
+
+  // Was 30s always-on; now 60s while visible, paused when hidden.
+  useAdaptivePoll(true, fetchDashboardData, {
+    activeMs: 60_000,
+    hiddenMs: null,
+    immediate: false,
+  })
 
   const getStatusColor = (status: string) => {
     switch (status) {

@@ -11,6 +11,7 @@ import {
 } from "@/components/orders/order-notification"
 import { WaiterCallNotification } from "@/components/orders/waiter-call-notification"
 import type { WaiterCall } from "@/lib/waiter-call"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 
 // ─── Acknowledgement helpers ──────────────────────────────────────────────────
 const ACK_KEY = "catha_notified_orders"
@@ -300,53 +301,56 @@ export function OrderNotificationsProvider({ children }: { children: React.React
       ackedRef.current = loadAcked()
       initializedRef.current = true
     }
+  }, [shouldShowNotifications])
 
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/catha/menu-orders", { cache: "no-store" })
-        if (!res.ok) return
-        const orders: any[] = await res.json()
+  const pollNewOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/catha/menu-orders?forNotifications=1", {
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const orders: any[] = await res.json()
 
-        const now = Date.now()
-        const newOrders: Order[] = []
+      const now = Date.now()
+      const newOrders: Order[] = []
 
-        for (const o of orders) {
-          if (o.status !== "sent" && o.status !== "paid" && o.status !== "active") continue
+      for (const o of orders) {
+        if (o.status !== "sent" && o.status !== "paid" && o.status !== "active") continue
 
-          const sentAt =
-            typeof o.lastSentAt === "number"
-              ? o.lastSentAt
-              : o.lastSentAt
-                ? new Date(o.lastSentAt).getTime()
-                : null
+        const sentAt =
+          typeof o.lastSentAt === "number"
+            ? o.lastSentAt
+            : o.lastSentAt
+              ? new Date(o.lastSentAt).getTime()
+              : null
 
-          if (!sentAt || now - sentAt > NOTIFY_WINDOW_MS) continue
-          if (ackedRef.current.has(o.orderId)) continue
+        if (!sentAt || now - sentAt > NOTIFY_WINDOW_MS) continue
+        if (ackedRef.current.has(o.orderId)) continue
 
-          ackedRef.current.add(o.orderId)
+        ackedRef.current.add(o.orderId)
 
-          if (o.status === "sent" || o.status === "paid") {
-            newOrders.push(normalizePopupOrder(o, menuPricesRef.current))
-          }
+        if (o.status === "sent" || o.status === "paid") {
+          newOrders.push(normalizePopupOrder(o, menuPricesRef.current))
         }
+      }
 
-        if (newOrders.length > 0) {
-          saveAcked(ackedRef.current)
-          setNewOrderPopups((prev) => {
-            const existingIds = new Set(prev.map((x) => x.orderId))
-            const toAdd = newOrders.filter((o) => !existingIds.has(o.orderId))
-            // Newest on top
-            return toAdd.length > 0 ? [...toAdd.reverse(), ...prev] : prev
-          })
-          playSound()
-        }
-      } catch {}
-    }
+      if (newOrders.length > 0) {
+        saveAcked(ackedRef.current)
+        setNewOrderPopups((prev) => {
+          const existingIds = new Set(prev.map((x) => x.orderId))
+          const toAdd = newOrders.filter((o) => !existingIds.has(o.orderId))
+          // Newest on top
+          return toAdd.length > 0 ? [...toAdd.reverse(), ...prev] : prev
+        })
+        playSound()
+      }
+    } catch {}
+  }, [playSound])
 
-    poll()
-    const interval = setInterval(poll, 3000)
-    return () => clearInterval(interval)
-  }, [shouldShowNotifications, playSound])
+  useAdaptivePoll(shouldShowNotifications, pollNewOrders, {
+    activeMs: 15_000,
+    hiddenMs: null,
+  })
 
   // Poll waiter calls (distinct softer chime)
   useEffect(() => {
@@ -360,77 +364,78 @@ export function OrderNotificationsProvider({ children }: { children: React.React
       } catch {}
       waiterInitializedRef.current = true
     }
+  }, [shouldShowNotifications])
 
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/catha/waiter-calls?status=pending", {
-          cache: "no-store",
-        })
-        if (!res.ok) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn(
-              `[waiter-calls] poll failed: ${res.status}`,
-              await res.text().catch(() => "")
-            )
-          }
-          return
+  const pollWaiterCalls = useCallback(async () => {
+    try {
+      const res = await fetch("/api/catha/waiter-calls?status=pending", {
+        cache: "no-store",
+      })
+      if (!res.ok) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn(
+            `[waiter-calls] poll failed: ${res.status}`,
+            await res.text().catch(() => "")
+          )
         }
-        const calls: WaiterCall[] = await res.json()
-        if (!Array.isArray(calls)) return
+        return
+      }
+      const calls: WaiterCall[] = await res.json()
+      if (!Array.isArray(calls)) return
 
-        const pending = calls.filter((c) => {
-          const id = c.callId || c.id
-          if (!id) return false
-          if (c.status !== "pending") return false
-          if (waiterDismissedRef.current.has(id)) return false
-          return true
-        })
+      const pending = calls.filter((c) => {
+        const id = c.callId || c.id
+        if (!id) return false
+        if (c.status !== "pending") return false
+        if (waiterDismissedRef.current.has(id)) return false
+        return true
+      })
 
-        const pendingIds = new Set(pending.map((c) => c.callId || c.id))
-        const toChime: WaiterCall[] = []
+      const pendingIds = new Set(pending.map((c) => c.callId || c.id))
+      const toChime: WaiterCall[] = []
+      for (const call of pending) {
+        const id = call.callId || call.id
+        if (!id || waiterChimedRef.current.has(id)) continue
+        waiterChimedRef.current.add(id)
+        toChime.push(call)
+      }
+
+      if (toChime.length > 0) {
+        saveAcked(waiterChimedRef.current, WAITER_CHIME_KEY)
+        playWaiterSound()
+      }
+
+      setWaiterCallPopups((prev) => {
+        const byId = new Map(prev.map((c) => [c.callId, c]))
         for (const call of pending) {
           const id = call.callId || call.id
-          if (!id || waiterChimedRef.current.has(id)) continue
-          waiterChimedRef.current.add(id)
-          toChime.push(call)
+          if (!id) continue
+          if (!byId.has(id)) byId.set(id, { ...call, callId: id })
         }
-
-        if (toChime.length > 0) {
-          saveAcked(waiterChimedRef.current, WAITER_CHIME_KEY)
-          playWaiterSound()
+        // Drop anything no longer pending on the server
+        for (const id of [...byId.keys()]) {
+          if (!pendingIds.has(id)) byId.delete(id)
         }
-
-        setWaiterCallPopups((prev) => {
-          const byId = new Map(prev.map((c) => [c.callId, c]))
-          for (const call of pending) {
-            const id = call.callId || call.id
-            if (!id) continue
-            if (!byId.has(id)) byId.set(id, { ...call, callId: id })
-          }
-          // Drop anything no longer pending on the server
-          for (const id of [...byId.keys()]) {
-            if (!pendingIds.has(id)) byId.delete(id)
-          }
-          const next = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
-          if (
-            next.length === prev.length &&
-            next.every((c, i) => c.callId === prev[i]?.callId)
-          ) {
-            return prev
-          }
-          return next
-        })
-      } catch (err) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[waiter-calls] poll error", err)
+        const next = [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
+        if (
+          next.length === prev.length &&
+          next.every((c, i) => c.callId === prev[i]?.callId)
+        ) {
+          return prev
         }
+        return next
+      })
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[waiter-calls] poll error", err)
       }
     }
+  }, [playWaiterSound])
 
-    poll()
-    const interval = setInterval(poll, 3000)
-    return () => clearInterval(interval)
-  }, [shouldShowNotifications, playWaiterSound])
+  useAdaptivePoll(shouldShowNotifications, pollWaiterCalls, {
+    activeMs: 15_000,
+    hiddenMs: null,
+  })
 
   const combinedCount = newOrderPopups.length + waiterCallPopups.length
   // Prefer waiter calls (urgent) in the visible stack, then fill with orders

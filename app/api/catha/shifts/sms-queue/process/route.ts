@@ -3,10 +3,17 @@ import { requireShiftSessionUser } from '@/lib/catha-shift-service'
 import { processShiftSmsQueueBatch } from '@/lib/catha-shift-sms-queue-worker'
 
 function hasCronAccess(request: Request): boolean {
-  const secret = String(process.env.CATHA_SMS_QUEUE_CRON_SECRET || '').trim()
+  const secret = String(
+    process.env.CATHA_SMS_QUEUE_CRON_SECRET || process.env.CRON_SECRET || ''
+  ).trim()
   if (!secret) return false
-  const provided = String(request.headers.get('x-cron-secret') || '').trim()
-  return provided === secret
+  const headerSecret = String(request.headers.get('x-cron-secret') || '').trim()
+  if (headerSecret && headerSecret === secret) return true
+  const auth = String(request.headers.get('authorization') || '').trim()
+  if (auth.toLowerCase().startsWith('bearer ') && auth.slice(7).trim() === secret) {
+    return true
+  }
+  return false
 }
 
 async function ensureAccess(request: Request): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
@@ -20,6 +27,15 @@ async function ensureAccess(request: Request): Promise<{ ok: true } | { ok: fals
 }
 
 export async function POST(request: Request) {
+  return processQueue(request)
+}
+
+/** Vercel Cron invokes paths with GET. */
+export async function GET(request: Request) {
+  return processQueue(request)
+}
+
+async function processQueue(request: Request) {
   const access = await ensureAccess(request)
   if (!access.ok) return access.response
   const url = new URL(request.url)

@@ -37,7 +37,7 @@ export const ProductCard = memo(function ProductCard({ product, onAddToCart, onB
       "group relative flex w-full min-w-0 flex-col overflow-hidden hover-lift bg-[#faf6ef] border border-[#deceba] shadow-[0_8px_20px_rgba(55,36,24,0.12)]",
       compact ? "rounded-lg sm:rounded-xl" : "rounded-xl sm:rounded-2xl"
     )}>
-      <Link href={`/product/${product.id}`} className="flex-1 flex flex-col">
+      <Link href={`/product/${product.id}`} prefetch={false} className="flex-1 flex flex-col">
         {/* Image Container */}
         <div className={cn(
           "relative w-full overflow-hidden bg-gradient-to-br from-[#efe5d7] to-[#f8f2e8]",

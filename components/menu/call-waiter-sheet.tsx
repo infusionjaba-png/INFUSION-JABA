@@ -30,6 +30,7 @@ import {
   startCooldown,
   tableDisplay,
 } from "@/lib/waiter-call"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 import { toast } from "sonner"
 import styles from "./call-waiter-sheet.module.css"
 
@@ -117,54 +118,44 @@ export function CallWaiterSheet({
   useEffect(() => () => clearTimers(), [clearTimers])
 
   // Poll for staff "On it" while confirmed sheet is open
-  useEffect(() => {
-    if (phase !== "confirmed" || !callId || !open) return
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/waiter-calls?callId=${encodeURIComponent(callId)}`, {
-          cache: "no-store",
-        })
-        if (!res.ok) return
-        const data = await res.json()
-        if (data?.status === "acknowledged") {
-          setStaffOnWay(true)
-          if (pollRef.current) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-          }
-          if (dismissTimer.current) {
-            clearTimeout(dismissTimer.current)
-            dismissTimer.current = null
-          }
-          const meta = reasonMeta(confirmedReason)
-          const label = data.reasonLabel || meta.label
-          if (claimWaiterAckNotification(callId)) {
-            playWaiterAckBeep()
-            toast.success("Waiter confirmed", {
-              description: `${label} · on the way`,
-              duration: 6000,
-            })
-          }
-          dismissTimer.current = setTimeout(() => {
-            onOpenChange(false)
-          }, 2200)
-        } else if (data?.status === "cancelled") {
-          clearPendingWaiterCall()
-          onOpenChange(false)
+  const pollStaffAck = useCallback(async () => {
+    if (phase !== "confirmed" || !callId || !open || staffOnWay) return
+    try {
+      const res = await fetch(`/api/waiter-calls?callId=${encodeURIComponent(callId)}`, {
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      if (data?.status === "acknowledged") {
+        setStaffOnWay(true)
+        if (dismissTimer.current) {
+          clearTimeout(dismissTimer.current)
+          dismissTimer.current = null
         }
-      } catch {}
-    }
-
-    poll()
-    pollRef.current = setInterval(poll, 2000)
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
+        const meta = reasonMeta(confirmedReason)
+        const label = data.reasonLabel || meta.label
+        if (claimWaiterAckNotification(callId)) {
+          playWaiterAckBeep()
+          toast.success("Waiter confirmed", {
+            description: `${label} · on the way`,
+            duration: 6000,
+          })
+        }
+        dismissTimer.current = setTimeout(() => {
+          onOpenChange(false)
+        }, 2200)
+      } else if (data?.status === "cancelled") {
+        clearPendingWaiterCall()
+        onOpenChange(false)
       }
-    }
-  }, [phase, callId, open, onOpenChange, confirmedReason, calledAt, tableNumber])
+    } catch {}
+  }, [phase, callId, open, staffOnWay, onOpenChange, confirmedReason])
+
+  useAdaptivePoll(
+    phase === "confirmed" && Boolean(callId) && open && !staffOnWay,
+    pollStaffAck,
+    { activeMs: 5_000, hiddenMs: null }
+  )
 
   const scheduleAutoDismiss = useCallback(() => {
     if (dismissTimer.current) clearTimeout(dismissTimer.current)

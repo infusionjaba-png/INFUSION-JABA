@@ -95,14 +95,25 @@ export async function claimProcessableShiftSmsBatch(limit: number, workerId: str
   const client = await clientPromise
   const col = client.db(DB_NAME).collection<ShiftSmsQueueItem>(COLLECTION)
   const now = new Date()
+  const stuckCutoff = new Date(now.getTime() - 2 * 60_000)
   const claimed: ShiftSmsQueueItem[] = []
   const take = Math.max(1, Math.min(500, limit))
   for (let i = 0; i < take; i += 1) {
     const doc = await col.findOneAndUpdate(
       {
-        status: { $in: ['pending', 'failed'] },
-        attempts: { $lt: MAX_ATTEMPTS },
-        nextRetryAt: { $lte: now },
+        $or: [
+          {
+            status: { $in: ['pending', 'failed'] },
+            attempts: { $lt: MAX_ATTEMPTS },
+            nextRetryAt: { $lte: now },
+          },
+          // Reclaim workers killed mid-send (Vercel freeze / timeout).
+          {
+            status: 'processing',
+            attempts: { $lt: MAX_ATTEMPTS },
+            processingAt: { $lte: stuckCutoff },
+          },
+        ],
       },
       {
         $set: {

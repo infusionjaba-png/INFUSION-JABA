@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSession } from "next-auth/react"
 import { Header } from "@/components/layout/header"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -93,9 +94,13 @@ export default function ManualMpesaReviewPage() {
       return
     }
     loadPending()
-    const iv = setInterval(loadPending, 30_000)
-    return () => clearInterval(iv)
   }, [session, canApprove, loadPending])
+
+  useAdaptivePoll(!!canApprove && session !== undefined, loadPending, {
+    activeMs: 60_000,
+    hiddenMs: null,
+    immediate: false,
+  })
 
   const handleApprove = async (row: PendingVerification) => {
     setActingId(row.id)

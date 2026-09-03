@@ -93,7 +93,78 @@ function isSmsConfigured(): boolean {
   )
 }
 
-async function deliverJabaSms(message: string, numbers: string[]): Promise<void> {
+/** Zettatel requires country code without leading +. Example: 2547XXXXXXXX */
+export function toZettatelMobile(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '')
+  return digits
+}
+
+function formatZettatelMobiles(numbers: string[]): string[] {
+  return [...new Set(numbers.map(toZettatelMobile).filter((n) => n.length >= 9))]
+}
+
+function parseZettatelResponse(text: string): {
+  ok: boolean
+  reason: string
+  transactionId?: string
+  invalidMobile?: string
+} {
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return { ok: false, reason: 'empty_provider_response' }
+
+  try {
+    const json = JSON.parse(trimmed) as Record<string, unknown>
+    const nested = (json.response && typeof json.response === 'object'
+      ? (json.response as Record<string, unknown>)
+      : null) as Record<string, unknown> | null
+    const status = String(json.status ?? nested?.status ?? '').toLowerCase()
+    const statusCode = String(json.statusCode ?? nested?.code ?? nested?.statusCode ?? '')
+    const reason = String(
+      json.reason ?? nested?.msg ?? nested?.reason ?? (status || 'unknown')
+    )
+    const transactionId = String(json.transactionId ?? nested?.transactionId ?? '').trim() || undefined
+    const invalidMobile = String(json.invalidMobile ?? '').trim() || undefined
+
+    const success =
+      status === 'success' ||
+      statusCode === '200' ||
+      reason.toLowerCase() === 'success'
+
+    if (!success) {
+      return {
+        ok: false,
+        reason: invalidMobile
+          ? `invalid_mobile:${invalidMobile}; ${reason}`
+          : reason || `provider_status:${status || statusCode || 'error'}`,
+        transactionId,
+        invalidMobile,
+      }
+    }
+    if (invalidMobile) {
+      return {
+        ok: false,
+        reason: `invalid_mobile:${invalidMobile}`,
+        transactionId,
+        invalidMobile,
+      }
+    }
+    return { ok: true, reason: 'success', transactionId }
+  } catch {
+    // Plain-text success responses still appear in older accounts.
+    const lower = trimmed.toLowerCase()
+    if (lower.includes('success') && !lower.includes('error') && !lower.includes('fail')) {
+      return { ok: true, reason: 'success' }
+    }
+    return { ok: false, reason: `unrecognized_provider_response:${trimmed.slice(0, 180)}` }
+  }
+}
+
+async function deliverJabaSms(message: string, numbers: string[]): Promise<{ transactionId?: string }> {
+  const mobiles = formatZettatelMobiles(numbers)
+  if (mobiles.length === 0) {
+    throw new Error('Cannot send SMS: no valid gateway mobile numbers')
+  }
+
   const endpoint = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send'
   const payload = new URLSearchParams({
     // Zettatel expects lowercase `userid` parameter.
@@ -102,7 +173,7 @@ async function deliverJabaSms(message: string, numbers: string[]): Promise<void>
     userId: process.env.ZETTATEL_USER_ID || '',
     password: process.env.ZETTATEL_PASSWORD || '',
     sendMethod: 'quick',
-    mobile: numbers.join(','),
+    mobile: mobiles.join(','),
     msg: message,
     senderid: process.env.ZETTATEL_SENDER_ID || '',
     msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
@@ -119,20 +190,36 @@ async function deliverJabaSms(message: string, numbers: string[]): Promise<void>
 
   console.log('[Jaba SMS] Sending request', {
     endpoint,
-    recipients: numbers,
-    recipientCount: numbers.length,
+    recipients: mobiles,
+    recipientCount: mobiles.length,
     senderId: process.env.ZETTATEL_SENDER_ID,
     msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
     hasApiKey: Boolean(process.env.ZETTATEL_API_KEY),
   })
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: payload.toString(),
-  })
+  const controller = new AbortController()
+  const timeoutMs = Math.max(5_000, Math.min(25_000, Number(process.env.ZETTATEL_TIMEOUT_MS) || 20_000))
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
-  const text = await res.text()
+  let res: Response
+  let text: string
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: payload.toString(),
+      signal: controller.signal,
+    })
+    text = await res.text()
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Zettatel timed out after ${timeoutMs}ms`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
+
   console.log('[Jaba SMS] Provider response', {
     status: res.status,
     ok: res.ok,
@@ -142,6 +229,12 @@ async function deliverJabaSms(message: string, numbers: string[]): Promise<void>
   if (!res.ok) {
     throw new Error(`Zettatel failed: ${res.status} ${text}`)
   }
+
+  const parsed = parseZettatelResponse(text)
+  if (!parsed.ok) {
+    throw new Error(`Zettatel rejected SMS: ${parsed.reason}`)
+  }
+  return { transactionId: parsed.transactionId }
 }
 
 export async function sendJabaSms(message: string, numbers: string[]) {
@@ -164,7 +257,10 @@ export async function sendJabaSms(message: string, numbers: string[]) {
 }
 
 /** Use for security-sensitive flows (e.g. delete OTP) so failures surface instead of succeeding silently. */
-export async function sendJabaSmsStrict(message: string, numbers: string[]) {
+export async function sendJabaSmsStrict(
+  message: string,
+  numbers: string[]
+): Promise<{ transactionId?: string }> {
   if (!message.trim()) {
     throw new Error('Cannot send SMS: empty message')
   }
@@ -176,7 +272,7 @@ export async function sendJabaSmsStrict(message: string, numbers: string[]) {
       'SMS gateway is not configured. Set ZETTATEL_USER_ID, ZETTATEL_PASSWORD, and ZETTATEL_SENDER_ID in the environment.'
     )
   }
-  await deliverJabaSms(message, numbers)
+  return deliverJabaSms(message, numbers)
 }
 
 export async function sendJabaSmsForEvent(event: keyof JabaSmsEventSettings, message: string) {

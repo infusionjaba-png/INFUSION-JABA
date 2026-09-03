@@ -2,6 +2,8 @@ import type { Db } from 'mongodb'
 import { normalizePhoneNumbers, sendJabaSmsStrict } from '@/lib/jaba-sms'
 import { summarizeCathaOrderPayments } from '@/lib/catha-order-payments'
 
+const STUCK_SENDING_MS = 2 * 60_000
+
 function buildCathaPaymentReceiptMessage(orderId: string): string {
   const receiptLink =
     process.env.CATHA_RECEIPT_LINK_BASE?.trim() ||
@@ -30,17 +32,37 @@ export async function maybeSendCathaPaymentReceiptSms(
   const targetPhone = normalized[0] || null
   if (!targetPhone) return { sent: false, reason: 'no_valid_customer_phone' }
 
+  const stuckCutoff = new Date(Date.now() - STUCK_SENDING_MS)
   const claim = await db.collection('orders').updateOne(
     force
       ? {
           id: orderId,
-          // Force resend still avoids duplicate concurrent send.
-          paymentReceiptSmsStatus: { $ne: 'SENDING' },
+          // Force resend still avoids duplicate concurrent send (unless stuck).
+          $or: [
+            { paymentReceiptSmsStatus: { $ne: 'SENDING' } },
+            { paymentReceiptSmsSentAt: { $lte: stuckCutoff } },
+            { paymentReceiptSmsSentAt: { $exists: false } },
+            { paymentReceiptSmsSentAt: null },
+          ],
         }
       : {
           id: orderId,
-          // Do not send duplicates while in-progress/sent, but allow retry from legacy/null/failed states.
-          paymentReceiptSmsStatus: { $nin: ['SENDING', 'SENT'] },
+          $or: [
+            // Fresh / failed / legacy rows.
+            { paymentReceiptSmsStatus: { $nin: ['SENDING', 'SENT'] } },
+            // Reclaim rows abandoned mid-send (common when the serverless invoke is killed).
+            {
+              paymentReceiptSmsStatus: 'SENDING',
+              paymentReceiptSmsSentAt: { $lte: stuckCutoff },
+            },
+            {
+              paymentReceiptSmsStatus: 'SENDING',
+              $or: [
+                { paymentReceiptSmsSentAt: { $exists: false } },
+                { paymentReceiptSmsSentAt: null },
+              ],
+            },
+          ],
         },
     {
       $set: {
@@ -68,12 +90,13 @@ export async function maybeSendCathaPaymentReceiptSms(
     )
     return { sent: true }
   } catch (error: any) {
+    const errMsg = String(error?.message || 'sms_send_failed')
     await db.collection('orders').updateOne(
       { id: orderId },
       {
         $set: {
           paymentReceiptSmsStatus: 'FAILED',
-          paymentReceiptSmsLastError: String(error?.message || 'sms_send_failed'),
+          paymentReceiptSmsLastError: errMsg,
           updatedAt: new Date(),
         },
         $unset: {
@@ -81,7 +104,6 @@ export async function maybeSendCathaPaymentReceiptSms(
         },
       }
     )
-    return { sent: false, reason: 'sms_send_failed' }
+    return { sent: false, reason: errMsg }
   }
 }
-

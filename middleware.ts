@@ -382,12 +382,22 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes - including /api/auth/*)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * Only run Edge middleware where auth redirects or legacy path rewrites are needed.
+     * Public storefront (/shop, /menu, /product, …) no longer pays Edge invocation cost.
      */
-    "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    "/catha/:path*",
+    "/jaba/:path*",
+    "/pos",
+    "/inventory",
+    "/suppliers",
+    "/stock-movement",
+    "/orders",
+    "/mpesa",
+    "/expenses",
+    "/clients",
+    "/users",
+    "/distributor-requests",
+    "/reports",
+    "/settings",
   ],
 }

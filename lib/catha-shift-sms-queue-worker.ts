@@ -10,8 +10,8 @@ import { randomUUID } from 'crypto'
 
 async function processOne(item: ShiftSmsQueueItem): Promise<'sent' | 'failed'> {
   try {
-    await sendJabaSmsStrict(item.message, [item.phone])
-    await markShiftSmsSent(String(item._id))
+    const result = await sendJabaSmsStrict(item.message, [item.phone])
+    await markShiftSmsSent(String(item._id), result.transactionId ?? null)
     await createShiftUserSmsLog({
       userId: item.userId,
       shiftId: undefined,

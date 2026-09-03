@@ -147,11 +147,18 @@ export default function WaitingPage() {
 
     pollRef.current = setInterval(() => {
       if (stopRef.current) return
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
       runCheck()
     }, POLL_INTERVAL_MS)
 
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && !stopRef.current) runCheck()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+
     return () => {
       stopRef.current = true
+      document.removeEventListener("visibilitychange", onVisible)
       if (pollRef.current) {
         clearInterval(pollRef.current)
         pollRef.current = null

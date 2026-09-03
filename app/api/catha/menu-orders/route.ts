@@ -9,7 +9,7 @@ import { menuOrderCreateSchema, menuOrderPutSchema, formatZodError } from "@/lib
 import { maybeSendOnlineOrderSms } from "@/lib/catha-online-order-sms"
 import { applyMenuOrderStockChange } from "@/lib/menu-order-stock"
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth()
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -20,12 +20,24 @@ export async function GET() {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
   }
   try {
+    const { searchParams } = new URL(request.url)
+    const forNotifications = searchParams.get("forNotifications") === "1"
+
     const db = await getDatabase("infusion_jaba")
-    const orders = await db
+    // Notification polls only need recent live rounds — avoid full-collection scans.
+    const filter = forNotifications
+      ? {
+          status: { $in: ["sent", "active", "paid"] },
+          lastSentAt: { $gte: new Date(Date.now() - 10 * 60 * 1000) },
+        }
+      : {}
+    const cursor = db
       .collection("menu_orders")
-      .find({})
+      .find(filter)
       .sort({ createdAt: -1 })
-      .toArray()
+      .limit(forNotifications ? 100 : 500)
+
+    const orders = await cursor.toArray()
 
     const formattedOrders = orders.map((order: any) => ({
       orderId: order.orderId,

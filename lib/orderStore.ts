@@ -1,5 +1,6 @@
 import { Order, OrderStatus, PaymentStatus, PaymentMethod, type CartItem } from "@/types/menu"
 import { createCathaOrderId } from "@/lib/catha-order-id"
+import { startAdaptivePoll } from "@/lib/adaptive-poll"
 
 /** Minimal fields allowed by POST /api/menu-orders (strict schema). */
 function menuOrderCreateApiPayload(o: Order) {
@@ -145,9 +146,17 @@ class OrderStore {
     if (typeof window !== "undefined") {
       this.loadFromMongoDB()
       window.addEventListener("storage", this.handleStorageChange.bind(this))
-      setInterval(() => this.loadFromMongoDB(), 2000)
+      // Adaptive: ~15s while tab visible; pause when hidden; immediate refresh on return.
+      // (Was a fixed 2s forever interval with no cleanup — major Vercel invocation source.)
+      this.stopPoll = startAdaptivePoll(() => this.loadFromMongoDB(), {
+        activeMs: 15_000,
+        hiddenMs: null,
+        skipIfInFlight: true,
+      })
     }
   }
+
+  private stopPoll: (() => void) | null = null
 
   private async loadFromMongoDB() {
     if (typeof window === "undefined") return

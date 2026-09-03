@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSession } from "next-auth/react"
 import { Header } from "@/components/layout/header"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -88,9 +89,13 @@ export default function FinanceDashboardPage() {
       return
     }
     void load()
-    const iv = setInterval(load, 60_000)
-    return () => clearInterval(iv)
   }, [session, canView, load])
+
+  useAdaptivePoll(!!canView && session !== undefined, load, {
+    activeMs: 60_000,
+    hiddenMs: null,
+    immediate: false,
+  })
 
   const handleExportCsv = () => {
     window.open(

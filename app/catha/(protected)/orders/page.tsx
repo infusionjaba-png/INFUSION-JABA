@@ -1,6 +1,7 @@
  "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useAdaptivePoll } from "@/hooks/use-adaptive-poll"
 
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -480,9 +481,13 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!mounted) return
     fetchDashboardSummary()
-    const iv = setInterval(fetchDashboardSummary, 30_000)
-    return () => clearInterval(iv)
   }, [mounted, fetchDashboardSummary])
+
+  useAdaptivePoll(mounted, fetchDashboardSummary, {
+    activeMs: 60_000,
+    hiddenMs: null,
+    immediate: false,
+  })
 
   const mapOrderRow = useCallback((o: any): Transaction => {
     const rawItems = Array.isArray(o.items) ? o.items : []
@@ -658,15 +663,18 @@ export default function OrdersPage() {
       if (!cancelled) fetchOrders()
     })()
 
-    const interval = setInterval(() => {
-      fetchOrders()
-    }, 2000)
-
     return () => {
       cancelled = true
-      clearInterval(interval)
     }
   }, [mounted, fetchOrders])
+
+  // Live board sync: 15s while visible (was 2s); pause when tab hidden; immediate on return.
+  // First fetch is done by the mount effect after sync-to-orders — avoid double hit.
+  useAdaptivePoll(mounted, fetchOrders, {
+    activeMs: 15_000,
+    hiddenMs: null,
+    immediate: false,
+  })
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(totalMatching / ORDERS_PAGE_SIZE))

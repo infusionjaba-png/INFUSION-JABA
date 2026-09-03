@@ -16,15 +16,17 @@ export default function SessionProvider({ children }: { children: React.ReactNod
     ? '/api/auth/jaba'
     : '/api/auth/catha'
 
-  /** Keep JWT/session closer to DB role/permissions on Catha + Jaba (nav uses /auth/me too). */
-  const refetchInterval =
-    pathname?.startsWith("/jaba") || pathname?.startsWith("/catha") ? 30 : 60
+  /** Keep JWT/session closer to DB role/permissions on Catha + Jaba only.
+   * Public shop/menu visitors previously polled /api/auth/catha/session every 60s. */
+  const isStaffApp =
+    pathname?.startsWith("/jaba") || pathname?.startsWith("/catha")
+  const refetchInterval = isStaffApp ? 60 : 0
 
   return (
     <NextAuthSessionProvider
       basePath={basePath}
       refetchInterval={refetchInterval}
-      refetchOnWindowFocus={true}
+      refetchOnWindowFocus={isStaffApp}
     >
       {children}
     </NextAuthSessionProvider>

@@ -6,5 +6,11 @@
   "regions": ["iad1"],
   "env": {
     "NODE_ENV": "production"
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/catha/shifts/sms-queue/process",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

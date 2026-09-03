@@ -43,6 +43,11 @@ export async function queueShiftUserSms(input: {
     message: input.message,
     eventType: input.eventType === 'SHIFT_OPENED' ? 'OPEN' : input.eventType === 'SHIFT_AUTO_CLOSED' ? 'AUTO_CLOSE' : 'CLOSE',
   })
-  void processShiftSmsQueueBatch(10).catch(() => {})
+  // Must await on Vercel — fire-and-forget is frozen when the HTTP response finishes.
+  try {
+    await processShiftSmsQueueBatch(10)
+  } catch (error) {
+    console.error('[shift-user-sms] queue process failed', error)
+  }
 }
 
