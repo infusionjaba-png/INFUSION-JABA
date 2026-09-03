@@ -11,7 +11,7 @@ import {
   buildDistributionDeliveredSmsBody,
   type DistributionSmsItem,
   normalizePhoneNumbers,
-  sendJabaSms,
+  sendJabaSmsStrict,
   sendJabaSmsForEvent,
 } from '@/lib/jaba-sms'
 import { getUserByEmail } from '@/lib/models/user'
@@ -232,7 +232,7 @@ export async function POST(request: Request) {
         }
         if (clientPhones.length > 0) {
           try {
-            await sendJabaSms(clientSms, clientPhones)
+            await sendJabaSmsStrict(clientSms, clientPhones)
             console.log(`[Delivery Notes API] Client delivery link SMS sent to ${clientPhones.length} number(s)`)
           } catch (e) {
             console.error('[Delivery Notes API] Client SMS failed:', e)

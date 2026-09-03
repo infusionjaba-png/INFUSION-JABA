@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { toast as sonnerToast } from "sonner"
 import { staff } from "@/lib/dummy-data"
-import { Building, Users, Bell, Shield, Printer, Receipt, Smartphone, Loader2, Truck, MapPin, Store, Clock, Plus, Trash2, Activity, AlertTriangle, RefreshCw, Lock, ShieldCheck } from "lucide-react"
+import { Building, Users, Bell, Shield, Printer, Receipt, Smartphone, Loader2, Truck, MapPin, Store, Clock, Plus, Trash2, Activity, AlertTriangle, RefreshCw, Lock, ShieldCheck, MessageSquare } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -278,6 +278,23 @@ export default function SettingsPage() {
   const [autoCloseGraceHours, setAutoCloseGraceHours] = useState(2)
   const [continuePromptWindowHours, setContinuePromptWindowHours] = useState(24)
   const [smsMetrics, setSmsMetrics] = useState<SmsDashboardMetrics | null>(null)
+
+  // SMS gateway (Zettatel) — settings override env when filled
+  const [smsGwUserId, setSmsGwUserId] = useState("")
+  const [smsGwPassword, setSmsGwPassword] = useState("")
+  const [smsGwApiKey, setSmsGwApiKey] = useState("")
+  const [smsGwSenderId, setSmsGwSenderId] = useState("")
+  const [smsGwApiUrl, setSmsGwApiUrl] = useState("")
+  const [smsGwMsgType, setSmsGwMsgType] = useState("text")
+  const [smsGwAdminOtpPhones, setSmsGwAdminOtpPhones] = useState("")
+  const [smsGwConfigured, setSmsGwConfigured] = useState(false)
+  const [smsGwPasswordConfigured, setSmsGwPasswordConfigured] = useState(false)
+  const [smsGwApiKeyConfigured, setSmsGwApiKeyConfigured] = useState(false)
+  const [smsGwEnvFallback, setSmsGwEnvFallback] = useState<Record<string, boolean>>({})
+  const [smsGwLoading, setSmsGwLoading] = useState(false)
+  const [smsGwSaving, setSmsGwSaving] = useState(false)
+  const [smsGwTesting, setSmsGwTesting] = useState(false)
+  const [smsGwTestPhone, setSmsGwTestPhone] = useState("")
 
   const eoPreview = useMemo(
     () =>
@@ -751,6 +768,113 @@ export default function SettingsPage() {
       .then((data) => setSmsMetrics(data?.metrics ?? null))
       .catch(() => {})
   }, [])
+
+  const applySmsGatewaySettings = useCallback((settings: any) => {
+    if (!settings) return
+    setSmsGwUserId(String(settings.userId || ""))
+    setSmsGwPassword(String(settings.password || ""))
+    setSmsGwApiKey(String(settings.apiKey || ""))
+    setSmsGwSenderId(String(settings.senderId || ""))
+    setSmsGwApiUrl(String(settings.apiUrl || ""))
+    setSmsGwMsgType(String(settings.msgType || "text"))
+    setSmsGwAdminOtpPhones(String(settings.adminOtpPhones || ""))
+    setSmsGwConfigured(Boolean(settings.configured))
+    setSmsGwPasswordConfigured(Boolean(settings.passwordConfigured))
+    setSmsGwApiKeyConfigured(Boolean(settings.apiKeyConfigured))
+    setSmsGwEnvFallback(settings.usingEnvFallback || {})
+  }, [])
+
+  const loadSmsGateway = useCallback(async () => {
+    setSmsGwLoading(true)
+    try {
+      const res = await fetch('/api/catha/settings/sms-gateway', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok || !data?.success) throw new Error(data?.error || 'Failed to load SMS gateway')
+      applySmsGatewaySettings(data.settings)
+    } catch (error: any) {
+      console.error(error)
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to load SMS gateway settings",
+        variant: "destructive",
+      })
+    } finally {
+      setSmsGwLoading(false)
+    }
+  }, [applySmsGatewaySettings, toast])
+
+  useEffect(() => {
+    void loadSmsGateway()
+  }, [loadSmsGateway])
+
+  const saveSmsGateway = async () => {
+    setSmsGwSaving(true)
+    try {
+      const res = await fetch('/api/catha/settings/sms-gateway', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: smsGwUserId,
+          password: smsGwPassword,
+          apiKey: smsGwApiKey,
+          senderId: smsGwSenderId,
+          apiUrl: smsGwApiUrl,
+          msgType: smsGwMsgType,
+          adminOtpPhones: smsGwAdminOtpPhones,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.success) throw new Error(data?.error || 'Failed to save')
+      applySmsGatewaySettings(data.settings)
+      toast({
+        title: "Success",
+        description: data.settings?.configured
+          ? "SMS gateway saved and ready to send"
+          : "SMS gateway saved — fill Sender ID plus User/Password or API Key (or keep env fallbacks)",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to save SMS gateway",
+        variant: "destructive",
+      })
+    } finally {
+      setSmsGwSaving(false)
+    }
+  }
+
+  const testSmsGateway = async () => {
+    const phoneErr = getPhoneValidationError(smsGwTestPhone)
+    if (phoneErr) {
+      toast({ title: "Invalid phone", description: phoneErr, variant: "destructive" })
+      return
+    }
+    setSmsGwTesting(true)
+    try {
+      const res = await fetch('/api/catha/settings/sms-gateway', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'test',
+          phone: normalizeKenyaPhone(smsGwTestPhone) || smsGwTestPhone,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.success) throw new Error(data?.error || 'Test SMS failed')
+      toast({
+        title: "Test SMS sent",
+        description: `Sent to ${data.phone}`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Test failed",
+        description: error?.message || "Could not send test SMS",
+        variant: "destructive",
+      })
+    } finally {
+      setSmsGwTesting(false)
+    }
+  }
 
   const saveBusinessInfo = async () => {
     setSaving(true)
@@ -1387,6 +1511,10 @@ export default function SettingsPage() {
               <TabsTrigger value="mpesa" className="gap-2">
                 <Smartphone className="h-4 w-4" />
                 M-Pesa
+              </TabsTrigger>
+              <TabsTrigger value="sms-gateway" className="gap-2">
+                <MessageSquare className="h-4 w-4" />
+                SMS
               </TabsTrigger>
               <TabsTrigger value="delivery" className="gap-2">
                 <Truck className="h-4 w-4" />
@@ -2293,6 +2421,171 @@ export default function SettingsPage() {
                         Enable M-Pesa integration to configure payment gateway settings.
                       </p>
                     </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="sms-gateway" className="space-y-6">
+              <Card className="border-border bg-card">
+                <CardHeader>
+                  <CardTitle className="text-card-foreground">SMS Gateway (Zettatel)</CardTitle>
+                  <CardDescription>
+                    Fill any field here to override the matching environment variable. Blank fields keep using env.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {smsGwLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading SMS gateway…
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={smsGwConfigured ? "default" : "destructive"}>
+                          {smsGwConfigured ? "Ready to send" : "Not configured"}
+                        </Badge>
+                        {Object.entries(smsGwEnvFallback).some(([, v]) => v) ? (
+                          <Badge variant="outline">Using env for some blank fields</Badge>
+                        ) : null}
+                        <Button type="button" variant="ghost" size="sm" onClick={() => void loadSmsGateway()}>
+                          <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                          Refresh
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="sms-userid">
+                            User ID {smsGwEnvFallback.userId ? <span className="text-xs text-muted-foreground">(env fallback)</span> : null}
+                          </Label>
+                          <Input
+                            id="sms-userid"
+                            value={smsGwUserId}
+                            onChange={(e) => setSmsGwUserId(e.target.value)}
+                            placeholder="Zettatel userid"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="sms-sender">
+                            Sender ID {smsGwEnvFallback.senderId ? <span className="text-xs text-muted-foreground">(env fallback)</span> : null}
+                          </Label>
+                          <Input
+                            id="sms-sender"
+                            value={smsGwSenderId}
+                            onChange={(e) => setSmsGwSenderId(e.target.value)}
+                            placeholder="Approved sender name"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="sms-password">
+                            Password {smsGwPasswordConfigured && !smsGwPassword ? <span className="text-xs text-muted-foreground">(saved/env)</span> : null}
+                            {smsGwEnvFallback.password ? <span className="text-xs text-muted-foreground"> (env fallback)</span> : null}
+                          </Label>
+                          <Input
+                            id="sms-password"
+                            type="password"
+                            value={smsGwPassword}
+                            onChange={(e) => setSmsGwPassword(e.target.value)}
+                            placeholder={smsGwPasswordConfigured ? "Leave blank to keep current" : "Zettatel password"}
+                            autoComplete="new-password"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="sms-apikey">
+                            API Key {smsGwApiKeyConfigured && !smsGwApiKey ? <span className="text-xs text-muted-foreground">(saved/env)</span> : null}
+                            {smsGwEnvFallback.apiKey ? <span className="text-xs text-muted-foreground"> (env fallback)</span> : null}
+                          </Label>
+                          <Input
+                            id="sms-apikey"
+                            type="password"
+                            value={smsGwApiKey}
+                            onChange={(e) => setSmsGwApiKey(e.target.value)}
+                            placeholder={smsGwApiKeyConfigured ? "Leave blank to keep current" : "Optional if using user/password"}
+                            autoComplete="new-password"
+                          />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label htmlFor="sms-apiurl">
+                            API URL {smsGwEnvFallback.apiUrl ? <span className="text-xs text-muted-foreground">(env fallback)</span> : null}
+                          </Label>
+                          <Input
+                            id="sms-apiurl"
+                            value={smsGwApiUrl}
+                            onChange={(e) => setSmsGwApiUrl(e.target.value)}
+                            placeholder="https://portal.zettatel.com/SMSApi/send"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="sms-msgtype">Message type</Label>
+                          <Select value={smsGwMsgType} onValueChange={setSmsGwMsgType}>
+                            <SelectTrigger id="sms-msgtype">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="text">text</SelectItem>
+                              <SelectItem value="unicode">unicode</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <Label htmlFor="sms-admin-otp">
+                            Admin OTP phones{" "}
+                            {smsGwEnvFallback.adminOtpPhones ? (
+                              <span className="text-xs text-muted-foreground">(env OT_NUMBER fallback)</span>
+                            ) : null}
+                          </Label>
+                          <Input
+                            id="sms-admin-otp"
+                            value={smsGwAdminOtpPhones}
+                            onChange={(e) => setSmsGwAdminOtpPhones(e.target.value)}
+                            placeholder="07… or +2547… (comma-separated for multiple)"
+                            autoComplete="off"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Used for Jaba delete OTPs. M-Pesa change/unlock OTPs go to the integration phone in Notifications.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" onClick={() => void saveSmsGateway()} disabled={smsGwSaving}>
+                          {smsGwSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                          Save SMS gateway
+                        </Button>
+                      </div>
+
+                      <Separator />
+
+                      <div className="space-y-3">
+                        <Label htmlFor="sms-test-phone">Send test SMS</Label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            id="sms-test-phone"
+                            value={smsGwTestPhone}
+                            onChange={(e) => setSmsGwTestPhone(e.target.value)}
+                            placeholder="+2547…"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void testSmsGateway()}
+                            disabled={smsGwTesting || !smsGwConfigured}
+                          >
+                            {smsGwTesting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Send test
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Need Sender ID plus (User ID + Password) or API Key — from these fields or env. Do not mix
+                          mismatched user/password with an API key; use one auth method.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </CardContent>
               </Card>

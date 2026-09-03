@@ -1,5 +1,7 @@
 import clientPromise from '@/lib/mongodb'
 import { normalizePhoneNumbers } from '@/lib/phone-normalize'
+import { normalizeKenyaPhone } from '@/lib/phone-utils'
+import { resolveSmsGatewayConfig } from '@/lib/sms-gateway-settings'
 
 export { normalizePhoneNumbers } from '@/lib/phone-normalize'
 const SETTINGS_COLLECTION = 'jaba_settings'
@@ -85,24 +87,42 @@ export async function saveJabaSmsSettings(settings: Partial<JabaSmsSettings> & {
   return next
 }
 
-function isSmsConfigured(): boolean {
-  const hasUserPass = Boolean(
-    process.env.ZETTATEL_USER_ID?.trim() && process.env.ZETTATEL_PASSWORD?.trim()
-  )
-  const hasApiKey = Boolean(process.env.ZETTATEL_API_KEY?.trim())
-  const hasSender = Boolean(process.env.ZETTATEL_SENDER_ID?.trim())
-  // Zettatel accepts userId+password OR apiKey header — sender id is always required.
-  return hasSender && (hasUserPass || hasApiKey)
+async function isSmsConfigured(): Promise<boolean> {
+  const cfg = await resolveSmsGatewayConfig()
+  return cfg.configured
 }
 
 /** Zettatel requires country code without leading +. Example: 2547XXXXXXXX */
 export function toZettatelMobile(phone: string): string {
+  const kenya = normalizeKenyaPhone(phone)
+  if (kenya) return kenya.replace(/\D/g, '')
+
   const digits = String(phone || '').replace(/\D/g, '')
+  // Local 07… / 01… that somehow skipped Kenya normalize
+  if (/^0[17]\d{8}$/.test(digits)) return `254${digits.slice(1)}`
   return digits
 }
 
 function formatZettatelMobiles(numbers: string[]): string[] {
-  return [...new Set(numbers.map(toZettatelMobile).filter((n) => n.length >= 9))]
+  return [...new Set(numbers.map(toZettatelMobile).filter((n) => n.length >= 10 && n.length <= 15))]
+}
+
+function humanizeZettatelReason(reason: string): string {
+  const r = String(reason || '').trim()
+  const lower = r.toLowerCase()
+  if (lower.includes('invalid login') || lower.includes('invalid credentials') || lower === '401') {
+    return (
+      'Invalid Login — check Settings → SMS (User ID + Password) OR API Key only (not both mismatched). ' +
+      'Also confirm Sender ID is approved.'
+    )
+  }
+  if (lower.includes('invalid_mobile') || lower.includes('invalid mobile')) {
+    return `Invalid mobile number for Zettatel (${r}). Use a Kenyan mobile like 07XXXXXXXX / +2547XXXXXXXX.`
+  }
+  if (lower.includes('sender') && lower.includes('invalid')) {
+    return `Invalid Sender ID — use the exact approved sender from your Zettatel portal (${r}).`
+  }
+  return r
 }
 
 function parseZettatelResponse(text: string): {
@@ -173,43 +193,55 @@ async function deliverJabaSms(
     throw new Error('Cannot send SMS: no valid gateway mobile numbers')
   }
 
-  const endpoint = process.env.ZETTATEL_API_URL || 'https://portal.zettatel.com/SMSApi/send'
-  const hasUserPass = Boolean(
-    process.env.ZETTATEL_USER_ID?.trim() && process.env.ZETTATEL_PASSWORD?.trim()
-  )
+  const cfg = await resolveSmsGatewayConfig()
+  if (!cfg.configured) {
+    throw new Error(
+      'SMS gateway is not configured. Fill Settings → SMS Gateway (or set ZETTATEL_* env vars).'
+    )
+  }
+
+  const endpoint = cfg.apiUrl || 'https://portal.zettatel.com/SMSApi/send'
+  const hasUserPass = Boolean(cfg.userId && cfg.password)
+  const hasApiKey = Boolean(cfg.apiKey)
+  // Zettatel docs: authenticate with userId+password OR apiKey — not both at once.
+  // Prefer a complete user/password pair; otherwise use API key only.
+  const authMode: 'userpass' | 'apikey' = hasUserPass ? 'userpass' : 'apikey'
+  if (authMode === 'apikey' && !hasApiKey) {
+    throw new Error(
+      'SMS gateway auth incomplete. Set User ID + Password, or API Key (Settings → SMS / ZETTATEL_*).'
+    )
+  }
+
   const payload = new URLSearchParams({
     sendMethod: 'quick',
     mobile: mobiles.join(','),
     msg: message,
-    senderid: process.env.ZETTATEL_SENDER_ID || '',
-    msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
+    senderid: cfg.senderId,
+    msgType: cfg.msgType || 'text',
     // false so manual resends of the same receipt are not dropped
     duplicatecheck: options?.allowDuplicateCheck === true ? 'true' : 'false',
     output: 'json',
   })
-  if (hasUserPass) {
+  if (authMode === 'userpass') {
     // Zettatel expects lowercase `userid` parameter.
-    payload.set('userid', process.env.ZETTATEL_USER_ID || '')
-    // Keep camelCase variant as compatibility fallback.
-    payload.set('userId', process.env.ZETTATEL_USER_ID || '')
-    payload.set('password', process.env.ZETTATEL_PASSWORD || '')
+    payload.set('userid', cfg.userId)
+    payload.set('password', cfg.password)
   }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
   }
-  if (process.env.ZETTATEL_API_KEY?.trim()) {
-    headers.apikey = process.env.ZETTATEL_API_KEY.trim()
+  if (authMode === 'apikey') {
+    headers.apikey = cfg.apiKey
   }
 
   console.log('[Jaba SMS] Sending request', {
     endpoint,
     recipients: mobiles,
     recipientCount: mobiles.length,
-    senderId: process.env.ZETTATEL_SENDER_ID,
-    msgType: process.env.ZETTATEL_MSG_TYPE || 'text',
-    hasApiKey: Boolean(process.env.ZETTATEL_API_KEY?.trim()),
-    hasUserPass,
+    senderId: cfg.senderId,
+    msgType: cfg.msgType || 'text',
+    authMode,
     duplicatecheck: payload.get('duplicatecheck'),
   })
 
@@ -248,7 +280,7 @@ async function deliverJabaSms(
 
   const parsed = parseZettatelResponse(text)
   if (!parsed.ok) {
-    throw new Error(`Zettatel rejected SMS: ${parsed.reason}`)
+    throw new Error(`Zettatel rejected SMS: ${humanizeZettatelReason(parsed.reason)}`)
   }
   return { transactionId: parsed.transactionId }
 }
@@ -262,9 +294,9 @@ export async function sendJabaSms(message: string, numbers: string[]) {
     console.warn('[Jaba SMS] Skipped: no recipient numbers')
     return
   }
-  if (!isSmsConfigured()) {
+  if (!(await isSmsConfigured())) {
     console.error(
-      '[Jaba SMS] Skipped: missing env config. Required ZETTATEL_SENDER_ID plus (ZETTATEL_USER_ID+ZETTATEL_PASSWORD or ZETTATEL_API_KEY)'
+      '[Jaba SMS] Skipped: missing gateway config. Fill Settings → SMS Gateway or ZETTATEL_* env vars.'
     )
     return
   }
@@ -284,9 +316,9 @@ export async function sendJabaSmsStrict(
   if (numbers.length === 0) {
     throw new Error('Cannot send SMS: no recipient numbers')
   }
-  if (!isSmsConfigured()) {
+  if (!(await isSmsConfigured())) {
     throw new Error(
-      'SMS gateway is not configured. Set ZETTATEL_SENDER_ID and either ZETTATEL_USER_ID+ZETTATEL_PASSWORD or ZETTATEL_API_KEY.'
+      'SMS gateway is not configured. Fill Settings → SMS Gateway (or set ZETTATEL_* env vars).'
     )
   }
   return deliverJabaSms(message, numbers, options)
@@ -304,7 +336,7 @@ export async function sendJabaSmsForEvent(event: keyof JabaSmsEventSettings, mes
       return
     }
     console.log(`[Jaba SMS] Event "${event}" sending to ${settings.numbers.length} recipients`)
-    await sendJabaSms(message, settings.numbers)
+    await sendJabaSmsStrict(message, settings.numbers)
   } catch (error) {
     console.error(`[Jaba SMS] Failed to send ${event} SMS:`, error)
   }

@@ -158,7 +158,16 @@ export async function requestMpesaIntegrationOtp(params: {
     throw new Error('Could not determine OTP destination.')
   }
 
-  await db.collection(OTP_COLLECTION).insertOne({
+  const actionLabel =
+    params.action === 'unlock_mpesa_edit'
+      ? 'unlock M-Pesa settings'
+      : params.action === 'register_integration_phone'
+        ? 'register M-Pesa integration number'
+        : params.action === 'change_integration_phone_step1'
+          ? 'authorize integration number change'
+          : 'confirm new M-Pesa integration number'
+
+  const insertResult = await db.collection(OTP_COLLECTION).insertOne({
     action: params.action,
     requestedBy: params.requestedBy,
     otp,
@@ -170,19 +179,16 @@ export async function requestMpesaIntegrationOtp(params: {
     expiresAt,
   })
 
-  const actionLabel =
-    params.action === 'unlock_mpesa_edit'
-      ? 'unlock M-Pesa settings'
-      : params.action === 'register_integration_phone'
-        ? 'register M-Pesa integration number'
-        : params.action === 'change_integration_phone_step1'
-          ? 'authorize integration number change'
-          : 'confirm new M-Pesa integration number'
-
-  await sendJabaSmsStrict(
-    `Catha ${actionLabel} OTP: ${otp}. Expires in ${OTP_EXPIRY_MINUTES} minutes. Do not share this code.`,
-    [destinationPhone]
-  )
+  try {
+    await sendJabaSmsStrict(
+      `Catha ${actionLabel} OTP: ${otp}. Expires in ${OTP_EXPIRY_MINUTES} minutes. Do not share this code.`,
+      [destinationPhone]
+    )
+  } catch (error) {
+    // Do not leave a usable OTP if delivery failed — avoids "Invalid OTP" after a silent miss.
+    await db.collection(OTP_COLLECTION).deleteOne({ _id: insertResult.insertedId })
+    throw error
+  }
 
   return { maskedDestination: maskKenyaPhone(destinationPhone) }
 }

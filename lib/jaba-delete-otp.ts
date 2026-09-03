@@ -1,5 +1,6 @@
 import clientPromise from '@/lib/mongodb'
 import { normalizePhoneNumbers, sendJabaSmsStrict } from '@/lib/jaba-sms'
+import { resolveSmsGatewayConfig } from '@/lib/sms-gateway-settings'
 
 const DB_NAME = 'infusion_jaba'
 const COLLECTION = 'jaba_delete_otps'
@@ -43,11 +44,12 @@ export async function requestDeleteOtp(params: {
 }) {
   const minutes = params.expiryMinutes ?? OTP_EXPIRY_MINUTES
   const expiresAt = new Date(Date.now() + minutes * 60 * 1000)
-  const targetNumbers = normalizePhoneNumbers(process.env.OT_NUMBER || '')
+  const gateway = await resolveSmsGatewayConfig()
+  const targetNumbers = normalizePhoneNumbers(gateway.adminOtpPhones || process.env.OT_NUMBER || '')
 
   if (targetNumbers.length === 0) {
     throw new Error(
-      'OT_NUMBER is missing or invalid. Set OT_NUMBER to a valid mobile (e.g. 07XXXXXXXX or +2547XXXXXXXX).'
+      'Admin OTP phone missing. Set Settings → SMS → Admin OTP phones (or OT_NUMBER env) to a valid mobile (e.g. 07XXXXXXXX).'
     )
   }
 
@@ -56,7 +58,7 @@ export async function requestDeleteOtp(params: {
   const storageTargetId = params.targetId
   const otp = generateOtp()
 
-  await db.collection(COLLECTION).insertOne({
+  const insertResult = await db.collection(COLLECTION).insertOne({
     action: params.action,
     targetId: storageTargetId,
     requestedBy: params.requestedBy,
@@ -66,7 +68,12 @@ export async function requestDeleteOtp(params: {
     expiresAt,
   })
 
-  await sendJabaSmsStrict(`Jaba ${params.action} OTP: ${otp}. Expires in ${minutes} minutes.`, targetNumbers)
+  try {
+    await sendJabaSmsStrict(`Jaba ${params.action} OTP: ${otp}. Expires in ${minutes} minutes.`, targetNumbers)
+  } catch (error) {
+    await db.collection(COLLECTION).deleteOne({ _id: insertResult.insertedId })
+    throw error
+  }
 }
 
 export type VerifyDeleteOtpResult =

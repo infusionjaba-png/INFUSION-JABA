@@ -1,5 +1,5 @@
 import clientPromise from '@/lib/mongodb'
-import { sendJabaSms, normalizePhoneNumbers } from '@/lib/jaba-sms'
+import { sendJabaSmsStrict, normalizePhoneNumbers } from '@/lib/jaba-sms'
 import type { Db } from 'mongodb'
 
 export type CathaAuditType = 'SECURITY' | 'FINANCIAL' | 'SYSTEM'
@@ -186,10 +186,14 @@ async function maybeSendDeniedBurstSmsAlert(db: Db, doc: CathaAuditLogDoc) {
     `Endpoint: ${doc.endpoint}`,
   ].join(' | ')
 
-  await sendJabaSms(message, recipients)
-  await db.collection(ALERT_STATE_COLLECTION).updateOne(
-    { _id: stateId },
-    { $set: { lastSentAt: new Date(), userId: doc.userId, updatedAt: new Date() } },
-    { upsert: true }
-  )
+  try {
+    await sendJabaSmsStrict(message, recipients)
+    await db.collection(ALERT_STATE_COLLECTION).updateOne(
+      { _id: stateId },
+      { $set: { lastSentAt: new Date(), userId: doc.userId, updatedAt: new Date() } },
+      { upsert: true }
+    )
+  } catch (error) {
+    console.error('[catha-audit] Denied-burst SMS failed:', error)
+  }
 }

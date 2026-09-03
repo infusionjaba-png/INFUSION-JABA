@@ -24,7 +24,8 @@ export async function maybeSendOnlineOrderSms(
     await sendJabaSmsStrict(message, phones)
     return { sent: true }
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'sms_send_failed'
     console.error("[online-order-sms] Failed to send SMS:", error)
-    return { sent: false, reason: "sms_send_failed" }
+    return { sent: false, reason }
   }
 }

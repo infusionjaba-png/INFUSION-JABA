@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getJabaSmsSettings, normalizePhoneNumbers, saveJabaSmsSettings, sendJabaSms } from '@/lib/jaba-sms'
+import { getJabaSmsSettings, normalizePhoneNumbers, saveJabaSmsSettings, sendJabaSmsStrict } from '@/lib/jaba-sms'
 import { requireJabaSuperAdminDb } from '@/lib/api-jaba-permissions'
 
 export async function GET() {
@@ -73,11 +73,12 @@ export async function POST(request: NextRequest) {
       messageLength: message.length,
     })
 
-    await sendJabaSms(message, targetNumbers)
+    await sendJabaSmsStrict(message, targetNumbers)
     console.log('[Jaba SMS Test] Test SMS sent successfully')
     return NextResponse.json({ success: true, sentTo: targetNumbers.length })
   } catch (error) {
     console.error('[Jaba SMS Settings] POST test failed:', error)
-    return NextResponse.json({ error: 'Failed to send test SMS' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Failed to send test SMS'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
