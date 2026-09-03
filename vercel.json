@@ -10,7 +10,7 @@
   "crons": [
     {
       "path": "/api/catha/shifts/sms-queue/process",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
